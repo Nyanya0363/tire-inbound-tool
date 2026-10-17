@@ -1,0 +1,17 @@
+node_modules/
+dist/
+downloads/
+*.log
+.DS_Store
+Thumbs.db
+~$*.xlsx
+~$*.xls
+ui-screenshot*.png
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+
+# Local business data and generated import files must never be committed.
+*.xlsx
+*.xls
+*.csv
