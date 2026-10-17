@@ -15,3 +15,7 @@ vite.config.d.ts
 *.xlsx
 *.xls
 *.csv
+
+# Downloaded catalog files in the maintenance folder (never commit these)
+/商品目录更新/catalog*.json
+/商品目录更新/catalog-inbox/*.json

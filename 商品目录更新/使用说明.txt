@@ -1,0 +1,32 @@
+商品目录更新说明
+
+1. 打开线上工具：
+   https://nyanya0363.github.io/tire-inbound-tool/
+
+2. 页面底部 -> 维护商品目录 -> 上传新的《商品资料.xlsx》
+
+3. 检查页面显示的：
+   - 新增商品数
+   - 删除商品数
+   - 规格变化数
+   - 品牌数量
+
+4. 点“下载 catalog.json”
+
+5. 任选一种方式：
+   A. 直接把下载的 catalog.json 拖到“更新并发布.bat”上
+   B. 把 catalog.json 放进 catalog-inbox 文件夹，然后双击“更新并发布.bat”
+
+6. bat 会自动：
+   - 校验 catalog.json
+   - 复制到 public/catalog.json
+   - git add / commit / push
+   - GitHub Actions 自动重新部署
+
+7. 等 1～2 分钟，刷新线上页面。
+
+注意：
+- 不要手动修改 catalog.json。
+- 原始《商品资料.xlsx》不需要上传 GitHub。
+- 如果一次放了多个 catalog*.json，脚本会选择最新的一个。
+- 如果 GitHub 登录过期，push 时可能弹出登录窗口。
