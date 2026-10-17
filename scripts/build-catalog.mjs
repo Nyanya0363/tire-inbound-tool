@@ -65,6 +65,86 @@ function readSheetRows(sheet) {
   return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
 }
 
+// GBK 字节被当成 Latin-1/Windows-1252 解码时会出现这种乱码，
+// 例如“商品编号”会变成“ÉÌÆ·±àºÅ”。
+const CP1252_BYTES = {
+  '€': 0x80,
+  '‚': 0x82,
+  'ƒ': 0x83,
+  '„': 0x84,
+  '…': 0x85,
+  '†': 0x86,
+  '‡': 0x87,
+  'ˆ': 0x88,
+  '‰': 0x89,
+  'Š': 0x8a,
+  '‹': 0x8b,
+  'Œ': 0x8c,
+  'Ž': 0x8e,
+  '‘': 0x91,
+  '’': 0x92,
+  '“': 0x93,
+  '”': 0x94,
+  '•': 0x95,
+  '–': 0x96,
+  '—': 0x97,
+  '˜': 0x98,
+  '™': 0x99,
+  'š': 0x9a,
+  '›': 0x9b,
+  'œ': 0x9c,
+  'ž': 0x9e,
+  'Ÿ': 0x9f,
+};
+
+function encodeCodePageBytes(text) {
+  const bytes = new Uint8Array(text.length);
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    if (code <= 0xff) {
+      bytes[i] = code;
+      continue;
+    }
+    const mapped = CP1252_BYTES[text[i]];
+    if (mapped === undefined) return null;
+    bytes[i] = mapped;
+  }
+  return bytes;
+}
+
+function repairMojibake(value) {
+  if (!/[\u0080-\u00ff]/.test(value)) return value;
+  const bytes = encodeCodePageBytes(value);
+  if (!bytes) return value;
+  try {
+    const decoded = new TextDecoder('gb18030').decode(bytes);
+    // 只有解出中文才认为修复成功，避免误伤正常的西文内容。
+    return /[\u3400-\u9fff]/.test(decoded) ? decoded : value;
+  } catch {
+    return value;
+  }
+}
+
+function repairSheetRows(rows) {
+  let needsRepair = false;
+  const limit = Math.min(rows.length, HEADER_SCAN_LIMIT);
+  for (let rowIndex = 0; rowIndex < limit; rowIndex += 1) {
+    const headers = (rows[rowIndex] ?? []).map((value) => String(value ?? '').trim());
+    if (!headers.some(Boolean)) continue;
+    const current = detectColumns(headers);
+    if (current.code >= 0 || current.spec >= 0) continue;
+    const repairedColumns = detectColumns(headers.map(repairMojibake));
+    if (repairedColumns.code >= 0 && repairedColumns.spec >= 0) {
+      needsRepair = true;
+      break;
+    }
+  }
+  if (!needsRepair) return rows;
+  return rows.map((row) =>
+    row.map((value) => (typeof value === 'string' ? repairMojibake(value) : value)),
+  );
+}
+
 function scanHeaderRows(workbook) {
   let best = null;
   let fallback = null;
@@ -72,14 +152,14 @@ function scanHeaderRows(workbook) {
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
     if (!sheet) continue;
-    const rows = readSheetRows(sheet);
+    const rows = repairSheetRows(readSheetRows(sheet));
     const limit = Math.min(rows.length, HEADER_SCAN_LIMIT);
     for (let rowIndex = 0; rowIndex < limit; rowIndex += 1) {
       const headers = (rows[rowIndex] ?? []).map((value) => String(value ?? '').trim());
       if (!headers.some(Boolean)) continue;
       const columns = detectColumns(headers);
       const score = countColumns(columns);
-      const candidate = { sheetName, headerRowIndex: rowIndex, headers, columns, score };
+      const candidate = { sheetName, headerRowIndex: rowIndex, headers, columns, score, rows };
       if (!fallback || score > fallback.score) fallback = candidate;
       if (columns.code < 0 || columns.spec < 0) continue;
       if (!best || score > best.score) best = candidate;
@@ -95,13 +175,30 @@ function describeHeaders(candidate) {
   return `工作表“${candidate.sheetName}”第 ${candidate.headerRowIndex + 1} 行识别到的表头：${preview || '（空）'}`;
 }
 
+// 不用 XLSX.readFile：它对中文路径支持不好，先读成 Buffer。
+const sourceBuffer = fs.readFileSync(sourceFile);
+const isZip =
+  sourceBuffer.length >= 4 &&
+  sourceBuffer[0] === 0x50 &&
+  sourceBuffer[1] === 0x4b &&
+  sourceBuffer[2] === 0x03 &&
+  sourceBuffer[3] === 0x04;
+const isOle =
+  sourceBuffer.length >= 4 &&
+  sourceBuffer[0] === 0xd0 &&
+  sourceBuffer[1] === 0xcf &&
+  sourceBuffer[2] === 0x11 &&
+  sourceBuffer[3] === 0xe0;
+
 let workbook;
-if (sourceFile.toLowerCase().endsWith('.csv')) {
-  const buffer = fs.readFileSync(sourceFile);
-  let text = new TextDecoder('utf-8').decode(buffer);
+if (isZip || isOle) {
+  workbook = XLSX.read(sourceBuffer, { type: 'buffer' });
+} else {
+  // 有些系统把 CSV/HTML 直接导出成 .xls/.xlsx，按文本解码后再解析。
+  let text = new TextDecoder('utf-8').decode(sourceBuffer);
   if (text.includes('�')) {
     try {
-      const gb18030 = new TextDecoder('gb18030').decode(buffer);
+      const gb18030 = new TextDecoder('gb18030').decode(sourceBuffer);
       if (!gb18030.includes('�')) text = gb18030;
     } catch {
       // 环境不支持 gb18030 时保留 UTF-8 结果
@@ -109,9 +206,6 @@ if (sourceFile.toLowerCase().endsWith('.csv')) {
   }
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
   workbook = XLSX.read(text, { type: 'string' });
-} else {
-  // 不用 XLSX.readFile：它对中文路径支持不好，先读成 Buffer 再解析。
-  workbook = XLSX.read(fs.readFileSync(sourceFile), { type: 'buffer' });
 }
 
 if (!workbook.SheetNames.length) {
@@ -128,7 +222,7 @@ if (!best) {
   process.exit(1);
 }
 
-const aoa = readSheetRows(workbook.Sheets[best.sheetName]);
+const aoa = best.rows;
 const columns = best.columns;
 const rows = aoa.slice(best.headerRowIndex + 1);
 
@@ -163,7 +257,6 @@ if (!products.length) {
   process.exit(1);
 }
 
-const sourceBuffer = fs.readFileSync(sourceFile);
 const version = crypto.createHash('sha256').update(sourceBuffer).digest('hex').slice(0, 12);
 
 const catalog = {

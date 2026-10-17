@@ -117,4 +117,73 @@ describe('catalog builder header detection', () => {
     expect(result.catalog.products).toHaveLength(1);
     expect(result.catalog.products[0].spec).toBe('165R14LT HD517');
   });
+
+  it('repairs GBK text that was decoded as Latin-1 inside the workbook', async () => {
+    const mojibakeHeader = [
+      'ÉÌÆ·±àºÅ',
+      'ÉÌÆ·Ãû³Æ',
+      '¹æ¸ñ/ÐÍºÅ',
+      'Æ·ÅÆ',
+      'µ¥Î»',
+      'ÏúÊÛ¼Û¸ñ',
+      'Åú·¢¼Û¸ñ',
+      '³É±¾¼Û¸ñ',
+      '¿â´æÊý',
+      '²Ö¿â',
+      '¿â´æÎ»ÖÃ',
+      '±¸×¢',
+      'ÌõÂë',
+      'ÉÌÆ··ÖÀà',
+    ];
+    const mojibakeProduct = [
+      'A1',
+      'ÂÖÌ¥¼×',
+      '165R14LT HD517',
+      'º£´ó',
+      'Ìõ',
+      '0',
+      '300',
+      '284',
+      '1',
+      '¹ÄÉ½¿â',
+      '',
+      '',
+      '123456',
+      '',
+    ];
+    const file = makeFile([
+      { name: 'Sheet1', rows: [mojibakeHeader, mojibakeProduct] },
+    ]);
+    const result = await buildCatalogFromFile(file);
+
+    expect(result.catalog.products[0]).toEqual({
+      code: 'A1',
+      name: '轮胎甲',
+      spec: '165R14LT HD517',
+      brand: '海大',
+      unit: '条',
+      barcode: '123456',
+    });
+  });
+
+  it('detects a GBK CSV even when it is named .xls', async () => {
+    const hex =
+      'C9CCC6B7B1E0BAC52CC9CCC6B7C3FBB3C62CB9E6B8F12FD0CDBAC52CC6B7C5C62CB5A5CEBB2CCCF5C2EB0A' +
+      '41312CC2D6CCA5BCD72C3136355231344C542048443531372CBAA3B4F32CCCF52C3132333435360A';
+    const bytes = Uint8Array.from(
+      hex.match(/../g)?.map((byte) => parseInt(byte, 16)) ?? [],
+    );
+    const file = new File([bytes], '商品资料.xls');
+
+    const result = await buildCatalogFromFile(file);
+
+    expect(result.catalog.products[0]).toEqual({
+      code: 'A1',
+      name: '轮胎甲',
+      spec: '165R14LT HD517',
+      brand: '海大',
+      unit: '条',
+      barcode: '123456',
+    });
+  });
 });

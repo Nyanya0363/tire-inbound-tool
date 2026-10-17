@@ -61,6 +61,7 @@ interface HeaderCandidate {
   headers: string[];
   columns: ColumnMap;
   score: number;
+  rows: unknown[][];
 }
 
 function readSheetRows(sheet: XLSX.WorkSheet): unknown[][] {
@@ -69,6 +70,86 @@ function readSheetRows(sheet: XLSX.WorkSheet): unknown[][] {
     defval: '',
     raw: false,
   });
+}
+
+// GBK 字节被当成 Latin-1/Windows-1252 解码时会出现这种乱码，
+// 例如“商品编号”会变成“ÉÌÆ·±àºÅ”。
+const CP1252_BYTES: Record<string, number> = {
+  '€': 0x80,
+  '‚': 0x82,
+  'ƒ': 0x83,
+  '„': 0x84,
+  '…': 0x85,
+  '†': 0x86,
+  '‡': 0x87,
+  'ˆ': 0x88,
+  '‰': 0x89,
+  'Š': 0x8a,
+  '‹': 0x8b,
+  'Œ': 0x8c,
+  'Ž': 0x8e,
+  '‘': 0x91,
+  '’': 0x92,
+  '“': 0x93,
+  '”': 0x94,
+  '•': 0x95,
+  '–': 0x96,
+  '—': 0x97,
+  '˜': 0x98,
+  '™': 0x99,
+  'š': 0x9a,
+  '›': 0x9b,
+  'œ': 0x9c,
+  'ž': 0x9e,
+  'Ÿ': 0x9f,
+};
+
+function encodeCodePageBytes(text: string): Uint8Array | null {
+  const bytes = new Uint8Array(text.length);
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    if (code <= 0xff) {
+      bytes[i] = code;
+      continue;
+    }
+    const mapped = CP1252_BYTES[text[i]];
+    if (mapped === undefined) return null;
+    bytes[i] = mapped;
+  }
+  return bytes;
+}
+
+function repairMojibake(value: string): string {
+  if (!/[\u0080-\u00ff]/.test(value)) return value;
+  const bytes = encodeCodePageBytes(value);
+  if (!bytes) return value;
+  try {
+    const decoded = new TextDecoder('gb18030').decode(bytes);
+    // 只有解出中文才认为修复成功，避免误伤正常的西文内容。
+    return /[\u3400-\u9fff]/.test(decoded) ? decoded : value;
+  } catch {
+    return value;
+  }
+}
+
+function repairSheetRows(rows: unknown[][]): unknown[][] {
+  let needsRepair = false;
+  const limit = Math.min(rows.length, HEADER_SCAN_LIMIT);
+  for (let rowIndex = 0; rowIndex < limit; rowIndex += 1) {
+    const headers = (rows[rowIndex] ?? []).map((value) => String(value ?? '').trim());
+    if (!headers.some(Boolean)) continue;
+    const current = detectColumns(headers);
+    if (current.code >= 0 || current.spec >= 0) continue;
+    const repairedColumns = detectColumns(headers.map(repairMojibake));
+    if (repairedColumns.code >= 0 && repairedColumns.spec >= 0) {
+      needsRepair = true;
+      break;
+    }
+  }
+  if (!needsRepair) return rows;
+  return rows.map((row) =>
+    row.map((value) => (typeof value === 'string' ? repairMojibake(value) : value)),
+  );
 }
 
 function scanHeaderRows(workbook: XLSX.WorkBook): {
@@ -81,7 +162,7 @@ function scanHeaderRows(workbook: XLSX.WorkBook): {
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
     if (!sheet) continue;
-    const rows = readSheetRows(sheet);
+    const rows = repairSheetRows(readSheetRows(sheet));
     const limit = Math.min(rows.length, HEADER_SCAN_LIMIT);
     for (let rowIndex = 0; rowIndex < limit; rowIndex += 1) {
       const headers = (rows[rowIndex] ?? []).map((value) => String(value ?? '').trim());
@@ -94,6 +175,7 @@ function scanHeaderRows(workbook: XLSX.WorkBook): {
         headers,
         columns,
         score,
+        rows,
       };
       if (!fallback || score > fallback.score) fallback = candidate;
       if (columns.code < 0 || columns.spec < 0) continue;
@@ -114,8 +196,8 @@ function stripBom(text: string): string {
   return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 }
 
-// 国内系统导出的 CSV 常见 GBK/GB18030 编码，按 UTF-8 读会变乱码。
-function decodeCsv(buffer: ArrayBuffer): string {
+// 国内系统导出的 CSV/HTML 常见 GBK/GB18030 编码，按 UTF-8 读会变乱码。
+function decodeText(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   let text = new TextDecoder('utf-8').decode(bytes);
   if (text.includes('�')) {
@@ -129,12 +211,22 @@ function decodeCsv(buffer: ArrayBuffer): string {
   return stripBom(text);
 }
 
+function hasSignature(buffer: ArrayBuffer, signature: number[]): boolean {
+  if (buffer.byteLength < signature.length) return false;
+  const bytes = new Uint8Array(buffer, 0, signature.length);
+  return signature.every((byte, index) => bytes[index] === byte);
+}
+
 async function readWorkbook(file: File): Promise<XLSX.WorkBook> {
   const buffer = await file.arrayBuffer();
-  if (file.name.toLowerCase().endsWith('.csv')) {
-    return XLSX.read(decodeCsv(buffer), { type: 'string' });
+  // 按文件内容判断格式，不只看扩展名：有些系统会把 CSV/HTML
+  // 直接导出成 .xls 或 .xlsx。
+  const isZip = hasSignature(buffer, [0x50, 0x4b, 0x03, 0x04]); // xlsx
+  const isOle = hasSignature(buffer, [0xd0, 0xcf, 0x11, 0xe0]); // xls
+  if (isZip || isOle) {
+    return XLSX.read(buffer, { type: 'array' });
   }
-  return XLSX.read(buffer, { type: 'array' });
+  return XLSX.read(decodeText(buffer), { type: 'string' });
 }
 
 function cell(row: unknown[], index: number): string {
@@ -230,7 +322,7 @@ export async function buildCatalogFromFile(file: File): Promise<CatalogBuildResu
     );
   }
 
-  const aoa = readSheetRows(workbook.Sheets[best.sheetName]);
+  const aoa = best.rows;
   const columns = best.columns;
   const products: Product[] = aoa
     .slice(best.headerRowIndex + 1)
