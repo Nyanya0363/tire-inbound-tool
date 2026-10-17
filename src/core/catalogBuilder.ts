@@ -1,24 +1,31 @@
 import * as XLSX from 'xlsx';
 import type { Catalog, Product } from './types';
 
+const COLUMN_ALIASES = {
+  code: ['商品编号', '商品编码', '商品代码', '货号', '编号', 'SKU'],
+  name: ['商品名称', '品名', '名称'],
+  spec: ['规格/型号', '规格型号', '规格', '型号', '产品型号'],
+  brand: ['品牌'],
+  unit: ['单位'],
+  barcode: ['条码', '条形码', '商品条码'],
+} as const;
+
+type ColumnKey = keyof typeof COLUMN_ALIASES;
+type ColumnMap = Record<ColumnKey, number>;
+
+// 表头可能不在第一行（上面有标题、说明、空行），也可能在后面的工作表。
+// 扫描每个工作表的前 100 行，取列名命中最多的一行作为表头。
+const HEADER_SCAN_LIMIT = 100;
+
 function normalizeHeader(value: unknown): string {
+  // 去掉空白、全角空格、零宽字符以及所有标点符号，
+  // 让“规格/型号”“规格（型号）”“规格型号”都能匹配。
   return String(value ?? '')
-    .replace(/[\s　]+/g, '')
-    .replace(/[：:（）()]/g, '')
-    .trim();
+    .replace(/[\s​﻿]+/g, '')
+    .replace(/[^\p{L}\p{N}]+/gu, '');
 }
 
-function findHeaderRow(rows: unknown[][]): number {
-  for (let i = 0; i < Math.min(rows.length, 10); i += 1) {
-    const cells = (rows[i] ?? []).map(normalizeHeader);
-    if (cells.some((cell) => cell.includes('商品编号')) && cells.some((cell) => cell.includes('规格'))) {
-      return i;
-    }
-  }
-  return 0;
-}
-
-function findColumn(headers: string[], aliases: string[]): number {
+function findColumn(headers: string[], aliases: readonly string[]): number {
   const normalized = headers.map(normalizeHeader);
   for (const alias of aliases) {
     const target = normalizeHeader(alias);
@@ -31,6 +38,103 @@ function findColumn(headers: string[], aliases: string[]): number {
     if (index >= 0) return index;
   }
   return -1;
+}
+
+function detectColumns(headers: string[]): ColumnMap {
+  return {
+    code: findColumn(headers, COLUMN_ALIASES.code),
+    name: findColumn(headers, COLUMN_ALIASES.name),
+    spec: findColumn(headers, COLUMN_ALIASES.spec),
+    brand: findColumn(headers, COLUMN_ALIASES.brand),
+    unit: findColumn(headers, COLUMN_ALIASES.unit),
+    barcode: findColumn(headers, COLUMN_ALIASES.barcode),
+  };
+}
+
+function countColumns(columns: ColumnMap): number {
+  return Object.values(columns).filter((index) => index >= 0).length;
+}
+
+interface HeaderCandidate {
+  sheetName: string;
+  headerRowIndex: number;
+  headers: string[];
+  columns: ColumnMap;
+  score: number;
+}
+
+function readSheetRows(sheet: XLSX.WorkSheet): unknown[][] {
+  return XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+    header: 1,
+    defval: '',
+    raw: false,
+  });
+}
+
+function scanHeaderRows(workbook: XLSX.WorkBook): {
+  best: HeaderCandidate | null;
+  fallback: HeaderCandidate | null;
+} {
+  let best: HeaderCandidate | null = null;
+  let fallback: HeaderCandidate | null = null;
+
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    if (!sheet) continue;
+    const rows = readSheetRows(sheet);
+    const limit = Math.min(rows.length, HEADER_SCAN_LIMIT);
+    for (let rowIndex = 0; rowIndex < limit; rowIndex += 1) {
+      const headers = (rows[rowIndex] ?? []).map((value) => String(value ?? '').trim());
+      if (!headers.some(Boolean)) continue;
+      const columns = detectColumns(headers);
+      const score = countColumns(columns);
+      const candidate: HeaderCandidate = {
+        sheetName,
+        headerRowIndex: rowIndex,
+        headers,
+        columns,
+        score,
+      };
+      if (!fallback || score > fallback.score) fallback = candidate;
+      if (columns.code < 0 || columns.spec < 0) continue;
+      if (!best || score > best.score) best = candidate;
+    }
+  }
+
+  return { best, fallback };
+}
+
+function describeHeaders(candidate: HeaderCandidate | null): string {
+  if (!candidate) return '没有找到表头行';
+  const preview = candidate.headers.filter(Boolean).slice(0, 15).join('、');
+  return `工作表“${candidate.sheetName}”第 ${candidate.headerRowIndex + 1} 行识别到的表头：${preview || '（空）'}`;
+}
+
+function stripBom(text: string): string {
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+}
+
+// 国内系统导出的 CSV 常见 GBK/GB18030 编码，按 UTF-8 读会变乱码。
+function decodeCsv(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let text = new TextDecoder('utf-8').decode(bytes);
+  if (text.includes('�')) {
+    try {
+      const gb18030 = new TextDecoder('gb18030').decode(bytes);
+      if (!gb18030.includes('�')) text = gb18030;
+    } catch {
+      // 环境不支持 gb18030 时保留 UTF-8 结果
+    }
+  }
+  return stripBom(text);
+}
+
+async function readWorkbook(file: File): Promise<XLSX.WorkBook> {
+  const buffer = await file.arrayBuffer();
+  if (file.name.toLowerCase().endsWith('.csv')) {
+    return XLSX.read(decodeCsv(buffer), { type: 'string' });
+  }
+  return XLSX.read(buffer, { type: 'array' });
 }
 
 function cell(row: unknown[], index: number): string {
@@ -104,35 +208,32 @@ export function diffCatalogs(current: Catalog | undefined, next: Catalog): Catal
   };
 }
 
+const HEADER_CODE_VALUES = new Set(COLUMN_ALIASES.code.map(normalizeHeader));
+const HEADER_SPEC_VALUES = new Set(COLUMN_ALIASES.spec.map(normalizeHeader));
+
+function isRepeatedHeader(product: Product): boolean {
+  return (
+    HEADER_CODE_VALUES.has(normalizeHeader(product.code)) &&
+    HEADER_SPEC_VALUES.has(normalizeHeader(product.spec))
+  );
+}
+
 export async function buildCatalogFromFile(file: File): Promise<CatalogBuildResult> {
-  const isCsv = file.name.toLowerCase().endsWith('.csv');
-  const workbook = isCsv
-    ? XLSX.read(await file.text(), { type: 'string' })
-    : XLSX.read(await file.arrayBuffer(), { type: 'array' });
-  const sheetName = workbook.SheetNames[0];
-  if (!sheetName) throw new Error('商品资料里没有工作表');
-  const sheet = workbook.Sheets[sheetName];
-  const aoa = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
-    header: 1,
-    defval: '',
-    raw: false,
-  });
-  const headerRow = findHeaderRow(aoa);
-  const headers = (aoa[headerRow] ?? []).map((value) => String(value ?? '').trim());
-  const columns = {
-    code: findColumn(headers, ['商品编号', '商品编码', 'SKU', '编号']),
-    name: findColumn(headers, ['商品名称', '品名']),
-    spec: findColumn(headers, ['规格/型号', '规格型号', '规格', '型号']),
-    brand: findColumn(headers, ['品牌']),
-    unit: findColumn(headers, ['单位']),
-    barcode: findColumn(headers, ['条码', '条形码']),
-  };
-  if (columns.code < 0 || columns.spec < 0) {
-    throw new Error('商品资料缺少“商品编号”或“规格/型号”列');
+  const workbook = await readWorkbook(file);
+  if (!workbook.SheetNames.length) throw new Error('商品资料里没有工作表');
+
+  const { best, fallback } = scanHeaderRows(workbook);
+  if (!best) {
+    throw new Error(
+      `商品资料缺少“商品编号”或“规格/型号”列。${describeHeaders(fallback)}。` +
+        `已读取工作表：${workbook.SheetNames.join('、')}`,
+    );
   }
 
+  const aoa = readSheetRows(workbook.Sheets[best.sheetName]);
+  const columns = best.columns;
   const products: Product[] = aoa
-    .slice(headerRow + 1)
+    .slice(best.headerRowIndex + 1)
     .map((row) => ({
       code: cell(row, columns.code),
       name: cell(row, columns.name),
@@ -141,9 +242,11 @@ export async function buildCatalogFromFile(file: File): Promise<CatalogBuildResu
       unit: cell(row, columns.unit),
       barcode: cell(row, columns.barcode),
     }))
-    .filter((product) => product.code && product.spec);
+    .filter((product) => product.code && product.spec && !isRepeatedHeader(product));
 
-  if (!products.length) throw new Error('没有解析到有效商品行');
+  if (!products.length) {
+    throw new Error(`没有解析到有效商品行。${describeHeaders(best)}`);
+  }
 
   const counts = new Map<string, number>();
   products.forEach((product) => {
