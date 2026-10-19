@@ -23,10 +23,12 @@ import {
   buildInboundRows,
   createBlankInboundWorkbook,
   createImportWorkbook,
+  createNewProductWorkbook,
   createReportWorkbook,
   createSampleInboundWorkbook,
   downloadWorkbook,
   readInboundWorkbook,
+  validateInboundRow,
 } from './core/excel';
 import {
   buildBrandIndex,
@@ -34,7 +36,10 @@ import {
   matchRow,
   unsupportedBrandResult,
 } from './core/matcher';
-import { normalizeBrand } from './core/text';
+import { normalizeBrand, samePatternFamily } from './core/text';
+import { forgetAlias, readAliases, rememberAlias } from './core/aliases';
+import { pendingRows, resolveResult } from './core/workflow';
+import type { AliasMap } from './core/aliases';
 import { downloadDiagnostics, logger } from './core/logger';
 import type {
   Catalog,
@@ -44,8 +49,6 @@ import type {
   Product,
   RawInboundRow,
 } from './core/types';
-
-type AliasMap = Record<string, string>;
 
 const EMPTY_MAPPING: InputMapping = {
   model: '',
@@ -75,7 +78,7 @@ function aliasStorageKey(adapter: BrandAdapter): string {
 function loadAliases(adapter: BrandAdapter): AliasMap {
   try {
     const raw = localStorage.getItem(aliasStorageKey(adapter));
-    return raw ? (JSON.parse(raw) as AliasMap) : {};
+    return raw ? readAliases(JSON.parse(raw)) : {};
   } catch {
     return {};
   }
@@ -85,11 +88,12 @@ function saveAliases(adapter: BrandAdapter, aliases: AliasMap): void {
   localStorage.setItem(aliasStorageKey(adapter), JSON.stringify(aliases));
 }
 
-function statusInfo(result: MatchResult): {
-  label: '可导入' | '需确认' | '不可导入';
+function statusInfo(result: MatchResult, pendingNew = false): {
+  label: '可导入' | '需确认' | '不可导入' | '待新建';
   className: string;
   detail: string;
 } {
+  if (pendingNew) return { label: '待新建', className: 'badge review', detail: '本次入库模板已排除，可导出新建清单' };
   if (result.status === 'matched') {
     const detail =
       result.method === 'manual'
@@ -105,7 +109,8 @@ function statusInfo(result: MatchResult): {
     return {
       label: '需确认',
       className: 'badge review',
-      detail: result.method === 'core' ? '核心字段待核对' : '有候选，需人工选择',
+      detail: result.reason?.startsWith('数据异常') ? '数据异常，需修正原表'
+        : result.method === 'core' ? '核心字段待核对' : '有候选，需人工选择',
     };
   }
   const detail = result.reason?.includes('尚未配置匹配规则')
@@ -148,6 +153,8 @@ export default function App() {
   const [results, setResults] = useState<MatchResult[]>([]);
   const [manual, setManual] = useState<Record<number, string>>({});
   const [confirmed, setConfirmed] = useState<Record<number, boolean>>({});
+  const [newProducts, setNewProducts] = useState<Record<number, boolean>>({});
+  const [skipped, setSkipped] = useState<Record<number, boolean>>({});
   const [filter, setFilter] = useState<'all' | 'review' | 'importable' | 'blocked'>('all');
   const [reviewGroup, setReviewGroup] = useState<string>('all');
   const [showMapping, setShowMapping] = useState(false);
@@ -158,10 +165,12 @@ export default function App() {
   const [tutorials, setTutorials] = useState<Tutorial[]>([]);
   const [helpOpen, setHelpOpen] = useState(false);
   const [aliases, setAliases] = useState<AliasMap>({});
+  const [backupRevision, setBackupRevision] = useState(0);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [pickerRow, setPickerRow] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const newProductRows = useMemo(() => rows.filter(row => newProducts[row.rowNumber]), [rows, newProducts]);
 
   useEffect(() => {
     loadCatalog()
@@ -178,13 +187,15 @@ export default function App() {
     setResults([]);
     setManual({});
     setConfirmed({});
+    setNewProducts({});
+    setSkipped({});
     setFilter('all');
     setReviewGroup('all');
     setShowMapping(false);
     setDiffRow(null);
     setExportFormat(null);
     setLastExport(null);
-  }, [catalog?.version]);
+  }, [catalog]);
 
   useEffect(() => {
     if (!adapter) return;
@@ -196,6 +207,8 @@ export default function App() {
     setResults([]);
     setManual({});
     setConfirmed({});
+    setNewProducts({});
+    setSkipped({});
     setFilter('all');
     setReviewGroup('all');
     setShowMapping(false);
@@ -212,62 +225,20 @@ export default function App() {
 
   const effectiveResults = useMemo(() => {
     if (!index) return results;
-    return results.map((result) => {
-      const rowNumber = result.trace.rowNumber;
-      const code = manual[rowNumber];
-      if (code) {
-        const product = index.byCode.get(code);
-        if (product) {
-          return {
-            ...result,
-            status: 'matched' as const,
-            method: 'manual' as const,
-            product,
-            warning: undefined,
-            reason: '人工选择',
-            candidates: result.candidates,
-            trace: {
-              ...result.trace,
-              result: 'matched' as const,
-              method: 'manual' as const,
-              matchedCode: code,
-              reason: '人工选择',
-            },
-          };
-        }
-      }
-
-      if (result.method === 'core' && result.status === 'matched') {
-        if (!confirmed[rowNumber]) {
-          const reason = result.warning
-            ? `${result.warning.replace(/，请核对$/, '')}；确认后导出`
-            : '请核对商品描述后确认';
-          return {
-            ...result,
-            status: 'review' as const,
-            reason,
-            trace: {
-              ...result.trace,
-              result: 'review' as const,
-              reason,
-            },
-          };
-        }
-        return {
-          ...result,
-          status: 'matched' as const,
-          reason: '已人工确认',
-          trace: {
-            ...result.trace,
-            result: 'matched' as const,
-            reason: '已人工确认',
-          },
-        };
-      }
-
-      return result;
+    const source = new Map(rows.map(row => [row.rowNumber, row]));
+    return results.map(result => {
+      const n = result.trace.rowNumber;
+      return resolveResult(result, source.get(n), index, manual[n], confirmed[n], newProducts[n] ? 'new' : skipped[n] ? 'skip' : undefined);
     });
-  }, [results, manual, confirmed, index]);
+  }, [results, rows, manual, confirmed, index, newProducts, skipped]);
+
+  function changeMapping(next: InputMapping) {
+    setMapping(next);
+    setRows([]); setResults([]); setManual({}); setConfirmed({});
+    setNewProducts({}); setSkipped({}); setExportFormat(null);
+    setDiffRow(null); setPickerRow(null); setLastExport(null);
+    setError('列映射已更改，请重新点击“开始匹配”，再核对并导出。');
+  }
 
   const preview = useMemo(() => {
     if (!workbook || !mapping.model) {
@@ -324,9 +295,9 @@ export default function App() {
       workbook.sectionTitles.length > 1 ||
       unsupportedBrands.length > 0 ||
       !mapping.model ||
-      !mapping.qty
+      !mapping.qty || !mapping.price
     );
-  }, [workbook, unsupportedBrands, mapping.model, mapping.qty]);
+  }, [workbook, unsupportedBrands, mapping.model, mapping.qty, mapping.price]);
 
   const priceHeaders = useMemo(() => {
     const headers = (workbook?.headers ?? []).filter((header) =>
@@ -367,9 +338,7 @@ export default function App() {
     const parseErrors = effectiveResults.filter((result) =>
       result.reason?.startsWith('无法解析型号'),
     ).length;
-    const needsConfirmation = effectiveResults.filter(
-      (result) => result.method === 'core' && result.status === 'review',
-    ).length;
+    const needsConfirmation = pendingRows(effectiveResults, newProducts, skipped);
     return {
       total: effectiveResults.length,
       matched,
@@ -380,7 +349,7 @@ export default function App() {
       unsupported,
       parseErrors,
     };
-  }, [effectiveResults]);
+  }, [effectiveResults, newProducts, skipped]);
 
   const diffs = useMemo(() => {
     const map = new Map<number, TireDiff>();
@@ -489,8 +458,8 @@ export default function App() {
     let exportQty = 0;
     let exportAmount = 0;
     rows.forEach((row) => {
-      sourceQty += row.qty;
-      sourceAmount += row.qty * row.price;
+      if (Number.isFinite(row.qty)) sourceQty += row.qty;
+      if (Number.isFinite(row.qty * row.price)) sourceAmount += row.qty * row.price;
       if (resolvedMap.has(row.rowNumber)) {
         exportQty += row.qty;
         exportAmount += row.qty * row.price;
@@ -543,6 +512,8 @@ export default function App() {
       setResults([]);
       setManual({});
       setConfirmed({});
+      setNewProducts({});
+      setSkipped({});
       setFilter('all');
       setReviewGroup('all');
       setShowMapping(false);
@@ -588,8 +559,8 @@ export default function App() {
       setError('请选择“型号/规格”列');
       return;
     }
-    if (!mapping.qty) {
-      setError('请选择“数量”列');
+    if (!mapping.qty || !mapping.price) {
+      setError('请选择“数量”和“单价”列');
       return;
     }
     setBusy(true);
@@ -605,7 +576,8 @@ export default function App() {
         if (row.brand && !isSelectedBrand) {
           return unsupportedBrandResult(row.rowNumber, row.model, row.brand);
         }
-        return matchRow(row.rowNumber, row.model, adapter, index, aliases);
+        const brand = mapping.brand ? String(row.source[mapping.brand] ?? '').trim() : '';
+        return resolveResult(matchRow(row.rowNumber, row.model, adapter, index, aliases, brand || undefined), row, index);
       });
       nextResults.forEach((result) => {
         logger.event(result.status === 'matched' ? 'info' : 'warn', 'match_row', {
@@ -622,8 +594,11 @@ export default function App() {
       });
       setRows(inboundRows);
       setResults(nextResults);
+      setBackupRevision(value => value + 1);
       setManual({});
       setConfirmed({});
+      setNewProducts({});
+      setSkipped({});
       setFilter('all');
       setReviewGroup('all');
       setDiffRow(null);
@@ -654,13 +629,31 @@ export default function App() {
 
   function selectProduct(rowNumber: number, product: Product) {
     const result = results.find((item) => item.trace.rowNumber === rowNumber);
+    const row = rows.find(item => item.rowNumber === rowNumber);
+    if (!row || validateInboundRow(row).length) { setError('请先修正此行数量或单价，再重新上传匹配。'); return; }
+    const productParsed = index?.parsedProducts.get(product.code);
+    if (result?.parsed && productParsed && !samePatternFamily(result.parsed.pattern, productParsed.pattern)) {
+      setError(`基础花纹不同，不能对应此商品：厂家 ${result.parsed.pattern}，商品 ${productParsed.pattern}。请检查正确商品是否已建档。`);
+      return;
+    }
+    const comparison = result?.parsed && productParsed ? diffTire(result.parsed, productParsed) : null;
+    const issues = [...(productParsed?.issues ?? []),
+      ...(result?.parsed?.issues ?? []),
+      ...(result?.parsed?.unrecognized ? [`厂家未识别内容：${result.parsed.unrecognized}`] : []),
+      ...(productParsed?.unrecognized ? [`商品未识别内容：${productParsed.unrecognized}`] : []),
+    ];
+    if (!result?.parsed || !productParsed) issues.push('系统无法验证花纹，本次对应完全依赖人工核对');
+    if ((comparison?.hasCritical || issues.length || !result?.parsed || !productParsed)
+      && !window.confirm(`请核对本次人工选择：\n厂家型号：${result?.trace.rawModel ?? ''}\n商品规格：${product.spec}\n${[comparison?.summary, ...issues].filter(Boolean).join('；')}\n确认对应此商品并保存记忆吗？`)) return;
     const aliasKey = result ? makeAliasKey(result.trace.rawModel) : '';
     if (aliasKey) {
-      const next = { ...aliases, [aliasKey]: product.code };
+      const next = { ...aliases, [aliasKey]: rememberAlias(result!.trace.rawModel, product, adapter, result?.parsed?.brand) };
       setAliases(next);
       if (adapter) saveAliases(adapter, next);
     }
+    setSkipped(prev => ({ ...prev, [rowNumber]: false }));
     setManual((prev) => ({ ...prev, [rowNumber]: product.code }));
+    setNewProducts(prev => ({ ...prev, [rowNumber]: false }));
     logger.event('info', 'manual_select', {
       row: rowNumber,
       rawModel: result?.trace.rawModel,
@@ -673,11 +666,11 @@ export default function App() {
   function clearManual(rowNumber: number) {
     const result = results.find((item) => item.trace.rowNumber === rowNumber);
     const aliasKey = result ? makeAliasKey(result.trace.rawModel) : '';
-    if (aliasKey && aliases[aliasKey]) {
-      const next = { ...aliases };
-      delete next[aliasKey];
-      setAliases(next);
-      if (adapter) saveAliases(adapter, next);
+    if (result) {
+      const next = forgetAlias(result.trace.rawModel, result.parsed, aliases);
+      setAliases(next); saveAliases(adapter, next);
+      if (index) setResults(prev => prev.map(item => item.trace.rowNumber === rowNumber
+        ? matchRow(rowNumber, item.trace.rawModel, adapter, index, next, item.parsed?.brand) : item));
     }
     setManual((prev) => {
       const next = { ...prev };
@@ -695,6 +688,16 @@ export default function App() {
   }
 
   function toggleConfirm(rowNumber: number) {
+    const row = rows.find(item => item.rowNumber === rowNumber);
+    if (!row || validateInboundRow(row).length) { setError('请先修正数量或单价，再重新上传匹配。'); return; }
+    if (!confirmed[rowNumber]) rememberConfirmedRows([rowNumber]);
+    else {
+      const result = results.find(item => item.trace.rowNumber === rowNumber);
+      if (result) {
+        const next = forgetAlias(result.trace.rawModel, result.parsed, aliases);
+        setAliases(next); saveAliases(adapter, next);
+      }
+    }
     setConfirmed((prev) => {
       const next = { ...prev };
       if (next[rowNumber]) delete next[rowNumber];
@@ -714,6 +717,7 @@ export default function App() {
 
   function confirmRows(rowNumbers: number[]) {
     if (!rowNumbers.length) return;
+    rememberConfirmedRows(rowNumbers);
     setConfirmed((prev) => {
       const next = { ...prev };
       rowNumbers.forEach((rowNumber) => {
@@ -722,6 +726,19 @@ export default function App() {
       return next;
     });
     logger.event('info', 'core_confirm_rows', { rows: rowNumbers });
+  }
+
+  function rememberConfirmedRows(rowNumbers: number[]) {
+    const next = { ...aliases };
+    for (const rowNumber of rowNumbers) {
+      const result = results.find(item => item.trace.rowNumber === rowNumber);
+      const row = rows.find(row => row.rowNumber === rowNumber);
+      if (result?.product && row && !validateInboundRow(row).length) next[makeAliasKey(result.trace.rawModel)] = rememberAlias(
+        result.trace.rawModel, result.product, adapter, result.parsed?.brand,
+      );
+    }
+    setAliases(next);
+    saveAliases(adapter, next);
   }
 
   function confirmVisibleBatch() {
@@ -741,7 +758,7 @@ export default function App() {
   function openExportModal(format: 'xlsx' | 'xls') {
     if (!adapter) return;
     if (summary.needsConfirmation > 0) {
-      setError('还有“待核对”行未确认，请先确认或改选商品');
+      setError('仍有未处理行，请对应商品、标记待新建，或明确选择本次跳过。');
       return;
     }
     if (resolvedMap.size === 0) {
@@ -753,7 +770,10 @@ export default function App() {
 
   function performDownload() {
     if (!adapter || !catalog || !exportFormat || !workbook) return;
-    const exportRows = buildImportRows(rows, resolvedMap, supplierName);
+    if (summary.needsConfirmation > 0) { setError('仍有未处理行，请返回核对。'); setExportFormat(null); return; }
+    let exportRows;
+    try { exportRows = buildImportRows(rows, resolvedMap, supplierName, new Set(rows.filter(row => newProducts[row.rowNumber] || skipped[row.rowNumber]).map(row => row.rowNumber))); }
+    catch (error) { setError(error instanceof Error ? error.message : String(error)); setExportFormat(null); return; }
     if (!exportRows.length) {
       setError('没有可导出的行，请先完成匹配');
       return;
@@ -762,6 +782,7 @@ export default function App() {
     const fileName = `入库导入_${adapter.label}_${todayText()}.${format}`;
     const workbookFile = createImportWorkbook(exportRows);
     downloadWorkbook(workbookFile, fileName, format);
+    setBackupRevision(value => value + 1);
     logger.event('info', 'export_import', {
       format,
       rows: exportRows.length,
@@ -799,6 +820,8 @@ export default function App() {
     setResults([]);
     setManual({});
     setConfirmed({});
+    setNewProducts({});
+    setSkipped({});
     setFilter('all');
     setReviewGroup('all');
     setShowMapping(false);
@@ -818,6 +841,12 @@ export default function App() {
     );
     downloadWorkbook(report, `匹配报告_${adapter.label}_${todayText()}.xlsx`, 'xlsx');
     logger.event('info', 'export_report', { rows: effectiveResults.length });
+  }
+
+  function downloadNewProducts() {
+    if (!newProductRows.length) return;
+    downloadWorkbook(createNewProductWorkbook(newProductRows, supplierName, mapping.price), `待新建商品清单_${todayText()}.xlsx`);
+    setBackupRevision(value => value + 1);
   }
 
   function downloadBlank() {
@@ -878,7 +907,7 @@ export default function App() {
             </p>
             <ol className="upload-checklist">
               <li>只保留<strong>一行表头</strong>和<strong>本日需要入库的商品行</strong>。</li>
-              <li>删除其他日期、其他品牌、合计行、备注行。</li>
+              <li>删除其他日期、其他供应商的品牌行、合计行、备注行。海大和天府可放在同一文件中。</li>
               <li>保留下面这组字段；列名不完全一样也可以，下一步能手动映射。</li>
             </ol>
             <div className="header-chips" aria-label="标准表头">
@@ -900,7 +929,7 @@ export default function App() {
           </div>
 
           <div className="form-row">
-            <label htmlFor="brand">品牌</label>
+            <label htmlFor="brand">供应商</label>
             <select
               id="brand"
               value={brandId}
@@ -908,7 +937,7 @@ export default function App() {
             >
               {brandAdapters.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {item.label}
+                  {item.supplierName}
                 </option>
               ))}
             </select>
@@ -961,8 +990,8 @@ export default function App() {
 
               {unsupportedBrands.length > 0 && (
                 <div className="alert error">
-                  文件里检测到其他品牌：{unsupportedBrands.join('、')}。当前只配置了
-                  {adapter.label}，请先删除这些品牌的行后重新上传。
+                  文件里检测到不属于当前供应商配置的品牌：{unsupportedBrands.join('、')}。
+                  {adapter.supplierName}目前支持海大、天府，请先删除其他品牌的行后重新上传。
                 </div>
               )}
 
@@ -980,13 +1009,17 @@ export default function App() {
                 </div>
               )}
 
-              {(preview.missingQty > 0 || preview.missingPrice > 0) && (
-                <div className="alert warn">
-                  有 {preview.missingQty} 行数量为 0、{preview.missingPrice} 行单价为 0，请确认不是漏填或选错列。
+              {preview.rows.some(row => validateInboundRow(row).length > 0) && (
+                <div className="alert error">
+                  数量须为正整数，单价须大于 0。以下异常行不能导入，请修正原表后重新上传，或在匹配后明确跳过：
+                  <ul>{preview.rows.filter(row => validateInboundRow(row).length).slice(0, 8).map(row => (
+                    <li key={row.rowNumber}>第 {row.rowNumber} 行：{validateInboundRow(row).join('；')}</li>
+                  ))}</ul>
+                  异常行的合计仅包含可计算数值，不能作为完整订单合计。
                 </div>
               )}
 
-              {!hasBlockingIssue && (
+              {!hasBlockingIssue && !preview.rows.some(row => validateInboundRow(row).length) && (
                 <div className="alert success">文件检查通过，可以开始匹配。</div>
               )}
             </>
@@ -1007,7 +1040,7 @@ export default function App() {
               <div><span>型号列</span><strong>{mapping.model || '未识别'}</strong></div>
               <div><span>数量列</span><strong>{mapping.qty || '未识别'}</strong></div>
               <div><span>单位列</span><strong>{mapping.unit || '不填'}</strong></div>
-              <div><span>品牌列</span><strong>{mapping.brand || '当前品牌'}</strong></div>
+              <div><span>品牌列</span><strong>{mapping.brand || '从型号识别（默认海大）'}</strong></div>
             </div>
 
             <div className="price-choice">
@@ -1022,7 +1055,7 @@ export default function App() {
                       type="radio"
                       name="priceField"
                       checked={mapping.price === header}
-                      onChange={() => setMapping({ ...mapping, price: header })}
+                      onChange={() => changeMapping({ ...mapping, price: header })}
                     />
                     {header}
                   </label>
@@ -1030,7 +1063,7 @@ export default function App() {
               ) : (
                 <select
                   value={mapping.price}
-                  onChange={(event) => setMapping({ ...mapping, price: event.target.value })}
+                  onChange={(event) => changeMapping({ ...mapping, price: event.target.value })}
                 >
                   <option value="">请选择</option>
                   {workbook.headers.map((header) => (
@@ -1044,8 +1077,14 @@ export default function App() {
               供应商：<strong>{supplierName}</strong>
               <span>（系统固定）</span>
             </div>
+            {!!index?.skipped.length && (
+              <div className="alert warn">
+                当前供应商目录中有 {index.skipped.length} 条商品规格无法完整解析，未参与自动匹配。
+                可能为现有规则未覆盖的型号或资料缺失，可人工选择并保存对应关系；SKU 不会补齐缺失型号。
+              </div>
+            )}
 
-            {(!mapping.model || !mapping.qty) && (
+            {(!mapping.model || !mapping.qty || !mapping.price) && (
               <div className="alert error">
                 没有识别到型号列或数量列，请点“调整映射”手动指定。
               </div>
@@ -1057,7 +1096,7 @@ export default function App() {
                   <label>型号 / 规格列 *</label>
                   <select
                     value={mapping.model}
-                    onChange={(event) => setMapping({ ...mapping, model: event.target.value })}
+                    onChange={(event) => changeMapping({ ...mapping, model: event.target.value })}
                   >
                     <option value="">请选择</option>
                     {workbook.headers.map((header) => (
@@ -1069,7 +1108,7 @@ export default function App() {
                   <label>数量列 *</label>
                   <select
                     value={mapping.qty}
-                    onChange={(event) => setMapping({ ...mapping, qty: event.target.value })}
+                    onChange={(event) => changeMapping({ ...mapping, qty: event.target.value })}
                   >
                     <option value="">请选择</option>
                     {workbook.headers.map((header) => (
@@ -1081,7 +1120,7 @@ export default function App() {
                   <label>单位列</label>
                   <select
                     value={mapping.unit}
-                    onChange={(event) => setMapping({ ...mapping, unit: event.target.value })}
+                    onChange={(event) => changeMapping({ ...mapping, unit: event.target.value })}
                   >
                     <option value="">不填</option>
                     {workbook.headers.map((header) => (
@@ -1093,9 +1132,9 @@ export default function App() {
                   <label>品牌列</label>
                   <select
                     value={mapping.brand}
-                    onChange={(event) => setMapping({ ...mapping, brand: event.target.value })}
+                    onChange={(event) => changeMapping({ ...mapping, brand: event.target.value })}
                   >
-                    <option value="">不填（使用当前品牌）</option>
+                    <option value="">不填（从型号识别，默认海大）</option>
                     {workbook.headers.map((header) => (
                       <option key={header} value={header}>{header}</option>
                     ))}
@@ -1179,15 +1218,13 @@ export default function App() {
 
               {summary.needsConfirmation > 0 && (
                 <div className="alert warn">
-                  有 {summary.needsConfirmation} 条“待核对”尚未确认，确认后才能导出。
-                  {summary.unresolved > summary.needsConfirmation &&
-                    ` 另外还有 ${summary.unresolved - summary.needsConfirmation} 行未找到或需要人工选择。`}
+                  有 {summary.needsConfirmation} 行尚未处理。请对应商品、标记待新建，或明确选择“本次跳过”，再导出。
                 </div>
               )}
 
               {summary.needsConfirmation === 0 && summary.unresolved > 0 && (
                 <div className="alert warn">
-                  还有 {summary.unresolved} 行待处理，导出时不会包含这些行。
+                  有 {summary.unresolved} 行已标记待新建或本次跳过，不会写入本次入库模板。
                   {summary.unsupported > 0 && ` 其中 ${summary.unsupported} 行是未配置品牌。`}
                   {summary.parseErrors > 0 && ` ${summary.parseErrors} 行型号无法解析。`}
                 </div>
@@ -1202,7 +1239,13 @@ export default function App() {
                 </div>
               )}
 
+              {newProductRows.length > 0 && <div className="alert warn">
+                已标记 {newProductRows.length} 行待新建商品，本次入库模板会排除这些行。请下载清单，回系统新建后再更新目录、重新匹配。
+              </div>}
               <div className="toolbar">
+                {newProductRows.length > 0 && <button type="button" className="secondary" onClick={downloadNewProducts}>
+                  下载待新建清单（{newProductRows.length}）
+                </button>}
                 <button
                   type="button"
                   className="primary"
@@ -1321,7 +1364,7 @@ export default function App() {
                   <tbody>
                     {filteredResults.map((result) => {
                       const row = rowsByNumber.get(result.trace.rowNumber);
-                      const status = statusInfo(result);
+                      const status = skipped[result.trace.rowNumber] ? { label: '本次跳过', className: 'badge unmatched', detail: '已明确排除本次导入' } : statusInfo(result, newProducts[result.trace.rowNumber]);
                       const selectedCode = manual[result.trace.rowNumber] ?? result.product?.code;
                       return (
                         <tr key={result.trace.rowNumber} className={result.trace.rowNumber % 2 ? 'odd' : ''}>
@@ -1337,8 +1380,8 @@ export default function App() {
                               </div>
                             )}
                           </td>
-                          <td>{row?.qty ?? ''}</td>
-                          <td>{row?.price ?? ''}</td>
+                          <td>{row && Number.isFinite(row.qty) ? row.qty : '无效'}</td>
+                          <td>{row && Number.isFinite(row.price) ? row.price : '无效'}</td>
                           <td>
                             <span className={status.className}>{status.label}</span>
                             <div className="status-detail">{status.detail}</div>
@@ -1369,7 +1412,7 @@ export default function App() {
                                   >
                                     <span className="candidate-spec-main">{candidate.product.spec}</span>
                                     <small className="candidate-code-sub">{candidate.product.code}</small>
-                                    <span className="candidate-score">{candidate.score}</span>
+                                    <small className="candidate-difference">{candidate.reason}</small>
                                   </button>
                                 ))}
                               </div>
@@ -1377,13 +1420,24 @@ export default function App() {
                           </td>
                           <td>
                             <div className="row-actions">
-                              {result.method === 'core' && (
+                              <button type="button" className="row-action" onClick={() => {
+                                setSkipped(prev => ({ ...prev, [result.trace.rowNumber]: !prev[result.trace.rowNumber] }));
+                                setNewProducts(prev => ({ ...prev, [result.trace.rowNumber]: false }));
+                              }}>{skipped[result.trace.rowNumber] ? '取消跳过' : '本次跳过'}</button>
+                              {(newProducts[result.trace.rowNumber] || (!result.product && result.reason?.includes('疑似未建档'))) && (
+                                <button type="button" className="row-action" onClick={() => {
+                                  setSkipped(prev => ({ ...prev, [result.trace.rowNumber]: false }));
+                                  setNewProducts(prev => ({ ...prev, [result.trace.rowNumber]: !prev[result.trace.rowNumber] }));
+                                  setFilter('all');
+                                }}>{newProducts[result.trace.rowNumber] ? '取消待新建' : '标记待新建'}</button>
+                              )}
+                              {result.method === 'core' && !row?.validationErrors?.length && !skipped[result.trace.rowNumber] && !newProducts[result.trace.rowNumber] && (
                                 <button
                                   type="button"
                                   className="row-action row-action-primary"
                                   onClick={() => toggleConfirm(result.trace.rowNumber)}
                                 >
-                                  {confirmed[result.trace.rowNumber] ? '取消确认' : '确认核对'}
+                                  {confirmed[result.trace.rowNumber] ? '撤销确认并删除记忆' : '确认核对'}
                                 </button>
                               )}
                               {result.method === 'core' &&
@@ -1410,7 +1464,7 @@ export default function App() {
                                   className="row-action row-action-muted"
                                   onClick={() => clearManual(result.trace.rowNumber)}
                                 >
-                                  清除
+                                  清除选择并删除记忆
                                 </button>
                               )}
                             </div>
@@ -1444,9 +1498,13 @@ export default function App() {
         aliases={aliases}
         products={index?.products ?? []}
         adapterLabel={adapter.label}
+        adapterId={adapter.id}
+        backupRevision={backupRevision}
         onChange={(next) => {
           setAliases(next);
           saveAliases(adapter, next);
+          setResults([]); setManual({}); setConfirmed({}); setNewProducts({}); setSkipped({}); setExportFormat(null);
+          setError('映射记忆已更改，请重新匹配。');
           logger.event('info', 'aliases_changed', { count: Object.keys(next).length });
         }}
       />
@@ -1523,6 +1581,9 @@ export default function App() {
         amount={totals.exportAmount}
         priceField={mapping.price}
         supplierName={supplierName}
+        newProductModels={newProductRows.map(row => row.model)}
+        skippedModels={rows.filter(row => skipped[row.rowNumber]).map(row => `第 ${row.rowNumber} 行：${row.model}`)}
+        onDownloadNewProducts={downloadNewProducts}
         onConfirm={performDownload}
         onClose={() => setExportFormat(null)}
       />

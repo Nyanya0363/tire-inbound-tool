@@ -147,12 +147,30 @@ export async function readInboundWorkbook(
 
 function parseNumber(value: unknown): number {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value !== 'number' && typeof value !== 'string') return NaN;
   const text = String(value ?? '')
-    .replace(/,/g, '')
-    .replace(/[￥¥元\s]/g, '')
+    .normalize('NFKC')
+    .trim()
+    .replace(/^[￥¥]\s*/, '')
+    .replace(/\s*元$/, '')
     .trim();
-  const number = Number(text);
-  return Number.isFinite(number) ? number : 0;
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+|\d{1,3}(?:,\d{3})+(?:\.\d*)?)$/.test(text)) return NaN;
+  const number = Number(text.replace(/,/g, ''));
+  return Number.isFinite(number) ? number : NaN;
+}
+
+export function validateInboundRow(row: Pick<RawInboundRow, 'qty' | 'price' | 'validationErrors'>): string[] {
+  const errors = [...(row.validationErrors ?? [])];
+  if (!Number.isFinite(row.qty)) {
+    if (!errors.some(error => error.startsWith('数量'))) errors.push('数量为空或不是有效数字');
+  }
+  else if (!Number.isSafeInteger(row.qty) || row.qty <= 0) errors.push('数量必须为正整数');
+  if (!Number.isFinite(row.price)) {
+    if (!errors.some(error => error.startsWith('单价'))) errors.push('单价为空或不是有效数字');
+  }
+  else if (row.price <= 0) errors.push('单价必须大于 0，请核实原表或单价列');
+  else if (Number.isFinite(row.qty) && !Number.isFinite(row.qty * row.price)) errors.push('数量与单价乘积超出有效范围');
+  return [...new Set(errors)];
 }
 
 export interface InboundAnalysis {
@@ -188,6 +206,12 @@ export function analyzeInboundRows(
     }
     const qty = parseNumber(row[mapping.qty]);
     const price = parseNumber(row[mapping.price]);
+    const numericError = (field: string, value: unknown, number: number) => Number.isFinite(number) ? []
+      : [`${field}${String(value ?? '').trim() ? `不是有效数字（原值：${String(value)}）` : '为空'}`];
+    const validationErrors = validateInboundRow({ qty, price, validationErrors: [
+      ...numericError('数量', row[mapping.qty], qty),
+      ...numericError('单价', row[mapping.price], price),
+    ] });
     const unit = mapping.unit ? String(row[mapping.unit] ?? '').trim() : '';
     const brand = mapping.brand
       ? String(row[mapping.brand] ?? '').trim() || defaultBrand
@@ -200,6 +224,7 @@ export function analyzeInboundRows(
       unit,
       brand,
       source: row,
+      ...(validationErrors.length ? { validationErrors } : {}),
     });
   }
 
@@ -218,11 +243,17 @@ export function buildImportRows(
   rows: RawInboundRow[],
   resolved: Map<number, { code: string; name: string; spec: string; unit: string }>,
   supplierName: string,
+  excludedRows: ReadonlySet<number> = new Set(),
 ): ExportRow[] {
   return rows
     .map((row) => {
       const product = resolved.get(row.rowNumber);
-      if (!product) return null;
+      if (!product || excludedRows.has(row.rowNumber)) return null;
+      const errors = validateInboundRow(row);
+      if (errors.length) throw new Error(`第 ${row.rowNumber} 行不能导出：${errors.join('；')}`);
+      if (![product.code, product.name, product.spec, product.unit, supplierName].every(value => value.trim())) {
+        throw new Error(`第 ${row.rowNumber} 行商品资料或供应商不完整，不能导出`);
+      }
       return {
         supplier: supplierName,
         code: product.code,
@@ -282,6 +313,7 @@ export function createSampleInboundWorkbook(adapter: BrandAdapter): XLSX.WorkBoo
   return createInboundTemplate([
     [1, adapter.label, 'HAIDA 165R14LT 8PR 96/95Q  HD517', '条', 161, 63, 10143, 0.005, 0.02, 0.11, 0.01, 137.87235, ''],
     [2, adapter.label, 'HAIDA 175R14LT 8PR 99/97R  HD517', '条', 179, 189, 33831, 0.005, 0.02, 0.11, 0.01, 153.28665, ''],
+    [3, '天府', 'TIANFU 145R12LT 8PR 86/84Q RD-224', '条', 100, 10, 1000, 0, 0, 0, 0, 100, ''],
   ]);
 }
 
@@ -311,6 +343,19 @@ export function createImportWorkbook(rows: ExportRow[]): XLSX.WorkBook {
   ];
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, sheet, 'Sheet1');
+  return workbook;
+}
+
+export function createNewProductWorkbook(rows: RawInboundRow[], supplierName: string, priceField: string): XLSX.WorkBook {
+  const data = [
+    ['源文件行号', '供应商', '品牌', '厂家型号', '单位', '数量', '单价', '单价口径', '状态', '处理说明'],
+    ...rows.map(row => [row.rowNumber, supplierName, row.brand, row.model, row.unit, row.qty, row.price,
+      priceField, '待新建商品', '人工核对后回业务系统新建商品，更新商品目录后重新匹配；本行未写入入库导入模板。']),
+  ];
+  const sheet = XLSX.utils.aoa_to_sheet(data);
+  sheet['!cols'] = [10, 38, 10, 52, 8, 10, 14, 12, 16, 80].map(wch => ({ wch }));
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, '待新建商品清单');
   return workbook;
 }
 

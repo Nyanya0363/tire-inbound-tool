@@ -105,7 +105,7 @@ export function DiffDialog({
 
           <div className="diff-actions">
             <button type="button" className="primary" onClick={onConfirm}>
-              {confirmed ? '取消确认' : '确认使用此商品'}
+              {confirmed ? '撤销确认并删除记忆' : '确认使用此商品'}
             </button>
             <button type="button" className="secondary" onClick={onReselect}>
               改选商品

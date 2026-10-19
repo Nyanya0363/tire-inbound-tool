@@ -22,6 +22,8 @@ export interface ParsedTire {
   loadSpeed?: string;
   flags: string[];
   raw: string;
+  unrecognized?: string;
+  issues?: string[];
 }
 
 export interface Candidate {
@@ -75,6 +77,7 @@ export interface RawInboundRow {
   unit: string;
   brand: string;
   source: Record<string, unknown>;
+  validationErrors?: string[];
 }
 
 export interface InputMapping {

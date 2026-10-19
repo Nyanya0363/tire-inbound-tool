@@ -1,6 +1,9 @@
-import Fuse from 'fuse.js';
 import type { BrandAdapter } from '../brands/types';
 import type { Candidate, Catalog, MatchResult, MatchTrace, ParsedTire, Product } from './types';
+import { diffTire } from './diff';
+import { aliasCode, aliasIsCurrent, findAlias, rememberAlias } from './aliases';
+import type { AliasMap } from './aliases';
+export type { AliasMap } from './aliases';
 import {
   makeCoreFlagsKey,
   makeCoreKey,
@@ -8,6 +11,7 @@ import {
   makeSizePatternKey,
   normalizeBrand,
   normalizeText,
+  samePatternFamily,
 } from './text';
 
 export interface BrandIndex {
@@ -17,13 +21,8 @@ export interface BrandIndex {
   core: Map<string, Product[]>;
   coreFlags: Map<string, Product[]>;
   sizePattern: Map<string, Product[]>;
-  fuse: Fuse<Product>;
   parsedProducts: Map<string, ParsedTire>;
   skipped: Array<{ code: string; reason: string }>;
-}
-
-export interface AliasMap {
-  [normalizedModel: string]: string;
 }
 
 function addToMap(map: Map<string, Product[]>, key: string, product: Product): void {
@@ -70,44 +69,24 @@ export function buildBrandIndex(catalog: Catalog, adapter: BrandAdapter): BrandI
     sizePattern,
     parsedProducts,
     skipped,
-    fuse: new Fuse(products, {
-      keys: [
-        { name: 'code', weight: 0.45 },
-        { name: 'spec', weight: 0.4 },
-        { name: 'name', weight: 0.15 },
-      ],
-      threshold: 0.4,
-      ignoreLocation: true,
-      includeScore: true,
-    }),
   };
 }
 
 function candidateScore(parsed: ParsedTire, product: Product, index: BrandIndex): Candidate {
   const productParsed = index.parsedProducts.get(product.code);
-  let score = 50;
-  const reasons: string[] = ['同花纹同规格'];
-
-  if (productParsed) {
-    if (parsed.ply && productParsed.ply && parsed.ply === productParsed.ply) {
-      score += 20;
-      reasons.push(`层级 ${parsed.ply}`);
-    }
-    if (parsed.loadSpeed && productParsed.loadSpeed && parsed.loadSpeed === productParsed.loadSpeed) {
-      score += 20;
-      reasons.push(`载重速度 ${parsed.loadSpeed}`);
-    }
-    if (parsed.flags.length > 0) {
-      const productFlags = new Set(productParsed.flags);
-      const shared = parsed.flags.filter((flag) => productFlags.has(flag));
-      if (shared.length === parsed.flags.length) {
-        score += 10;
-        reasons.push(`标识 ${shared.join('/')}`);
-      }
-    }
-  }
-
-  return { product, score, reason: reasons.join('，') };
+  if (!productParsed) return { product, score: 0, reason: '商品规格无法完整解析，请维护商品资料' };
+  const diff = diffTire(parsed, productParsed);
+  const score = (parsed.size === productParsed.size ? 40 : 0)
+    + (parsed.pattern === productParsed.pattern ? 30 : 0)
+    + (parsed.ply === productParsed.ply ? 10 : 0)
+    + (parsed.loadSpeed === productParsed.loadSpeed ? 10 : 0)
+    + (parsed.flags.slice().sort().join() === productParsed.flags.slice().sort().join() ? 10 : 0);
+  const same = diff.items.filter(item => !item.different && ['size', 'pattern', 'ply', 'loadSpeed'].includes(item.field))
+    .map(item => `${item.label}一致（${item.manufacturer}）`);
+  return { product, score, reason: [...same, ...diff.reasons,
+    ...(productParsed.issues ?? []),
+    ...(productParsed.unrecognized ? [`商品规格有未识别内容：${productParsed.unrecognized}`] : []),
+  ].join('；') };
 }
 
 function rankCandidates(parsed: ParsedTire, products: Product[], index: BrandIndex): Candidate[] {
@@ -149,52 +128,52 @@ function makeTrace(
   };
 }
 
-export function matchRow(
+function matchParsedRow(
   rowNumber: number,
   rawModel: string,
   adapter: BrandAdapter,
   index: BrandIndex,
   aliases: AliasMap,
+  brand?: string,
 ): MatchResult {
   let parsed: ParsedTire | null = null;
   let exactKey = '';
   let coreKey = '';
   let coreFlagsKey = '';
   let sizePatternKey = '';
+  let parseError = '';
 
   try {
-    parsed = adapter.parseInbound(rawModel);
+    parsed = adapter.parseInbound(rawModel, brand);
     exactKey = makeExactKey(parsed);
     coreKey = makeCoreKey(parsed);
     coreFlagsKey = makeCoreFlagsKey(parsed);
     sizePatternKey = makeSizePatternKey(parsed);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const trace = makeTrace(rowNumber, rawModel, null, {
-      exactKey,
-      coreKey,
-      sizePatternKey,
-      exactCount: 0,
-      coreCount: 0,
-      result: 'unmatched',
-      method: 'none',
-      reason: message,
-      error: message,
-    });
-    return {
-      status: 'unmatched',
-      method: 'none',
-      candidates: [],
-      reason: message,
-      parsed: null,
-      trace,
-    };
+    parseError = error instanceof Error ? error.message : String(error);
   }
 
-  const aliasCode = aliases[normalizeText(rawModel)];
-  if (aliasCode) {
-    const product = index.byCode.get(aliasCode);
+  const modelKey = normalizeText(rawModel);
+  const entries = findAlias(rawModel, parsed, aliases).filter(entry => {
+    const product = index.byCode.get(aliasCode(entry));
+    return !product || normalizeBrand(product.brand) === normalizeBrand(brand || parsed?.brand || product.brand);
+  });
+  if (!entries.length) {
+    for (const mapping of adapter.confirmedMappings ?? []) {
+      const entry = rememberAlias(mapping.model, { ...mapping, name: '' }, adapter);
+      if (normalizeText(mapping.model) === modelKey || (parsed && entry.sourceKey === makeExactKey(parsed))) entries.push(entry);
+    }
+  }
+  const current = entries.filter(entry => typeof entry !== 'string'
+    && aliasIsCurrent(entry, index.byCode.get(entry.code))
+    && (!brand || normalizeBrand(entry.brand) === normalizeBrand(brand))
+    && (!parsed || (normalizeBrand(entry.brand) === normalizeBrand(parsed.brand)
+      && samePatternFamily(parsed.pattern, index.parsedProducts.get(entry.code)?.pattern ?? ''))));
+  const currentCodes = new Set(current.map(aliasCode));
+  if (currentCodes.size === 1 && current.length === entries.length) {
+    const product = index.byCode.get([...currentCodes][0]);
     if (product) {
+      const aliasReason = '命中已确认的型号对应关系，商品规格快照一致';
       const trace = makeTrace(rowNumber, rawModel, parsed, {
         exactKey,
         coreKey,
@@ -204,22 +183,40 @@ export function matchRow(
         result: 'matched',
         method: 'alias',
         matchedCode: product.code,
-        reason: '命中已保存的人工映射',
+        reason: aliasReason,
       });
       return {
         status: 'matched',
         method: 'alias',
         product,
         candidates: [],
-        reason: '命中已保存的人工映射',
+        reason: aliasReason,
         parsed,
         trace,
       };
     }
   }
 
+  if (entries.length) {
+    const reason = '已保存的对应关系缺少规格快照、商品已变更或存在冲突，请人工核对后重新选择并保存。';
+    const products = [...new Set(entries.map(aliasCode))].map(code => index.byCode.get(code))
+      .filter((product): product is Product => !!product
+        && normalizeBrand(product.brand) === normalizeBrand(brand || parsed?.brand || product.brand)
+        && (!parsed || samePatternFamily(parsed.pattern, index.parsedProducts.get(product.code)?.pattern ?? '')));
+    const candidates = parsed ? rankCandidates(parsed, products, index) : products.map(product => ({ product, score: 0, reason }));
+    return { status: 'review', method: 'candidate', parsed, candidates, reason,
+      trace: makeTrace(rowNumber, rawModel, parsed, { exactKey, coreKey, sizePatternKey, exactCount: 0, coreCount: 0,
+        result: 'review', method: 'candidate', reason, candidates }) };
+  }
+  if (!parsed) {
+    const reason = `${parseError}。型号规则无法完整识别，请人工选择商品；确认后可保存对应关系。`;
+    return { status: 'unmatched', method: 'none', parsed: null, candidates: [], reason,
+      trace: makeTrace(rowNumber, rawModel, null, { exactKey, coreKey, sizePatternKey, exactCount: 0, coreCount: 0,
+        result: 'unmatched', method: 'none', reason, error: parseError }) };
+  }
+
   const exactProducts = index.exact.get(exactKey) ?? [];
-  if (exactProducts.length === 1) {
+  if (exactProducts.length === 1 && parsed.loadSpeed) {
     const product = exactProducts[0];
     const trace = makeTrace(rowNumber, rawModel, parsed, {
       exactKey,
@@ -241,8 +238,11 @@ export function matchRow(
     };
   }
 
-  if (exactProducts.length > 1) {
-    const candidates = rankCandidates(parsed, exactProducts, index);
+  if (exactProducts.length > 1 || (exactProducts.length === 1 && !parsed.loadSpeed)) {
+    const candidates = rankCandidates(parsed, !parsed.loadSpeed
+      ? index.sizePattern.get(sizePatternKey) ?? exactProducts : exactProducts, index);
+    const reason = !parsed.loadSpeed ? '厂家型号未识别到完整载重速度，请人工核对，不能按缺失字段自动确认。'
+      : '有多个商品编号完全匹配，需要人工确认';
     const trace = makeTrace(rowNumber, rawModel, parsed, {
       exactKey,
       coreKey,
@@ -251,37 +251,36 @@ export function matchRow(
       coreCount: index.core.get(coreKey)?.length ?? 0,
       result: 'review',
       method: 'candidate',
-      reason: '有多个商品编号完全匹配，需要人工确认',
+      reason,
       candidates,
     });
     return {
       status: 'review',
       method: 'candidate',
       candidates,
-      reason: '有多个商品编号完全匹配，需要人工确认',
+      reason,
       parsed,
       trace,
     };
   }
 
   const coreProducts = index.core.get(coreKey) ?? [];
-  if (coreProducts.length === 1) {
+  if (coreProducts.length === 1 && !diffTire(parsed, index.parsedProducts.get(coreProducts[0].code)!).hasCritical) {
     const product = coreProducts[0];
-    const warning = '按规格/花纹/层级匹配，商品资料描述与厂家型号不完全一致，请核对';
+    const warning = `${diffTire(parsed, index.parsedProducts.get(product.code)!).summary}，请核对`;
     const trace = makeTrace(rowNumber, rawModel, parsed, {
       exactKey,
       coreKey,
       sizePatternKey,
       exactCount: 0,
       coreCount: 1,
-      result: 'matched',
+      result: 'review',
       method: 'core',
-      matchedCode: product.code,
       warning,
       reason: warning,
     });
     return {
-      status: 'matched',
+      status: 'review',
       method: 'core',
       product,
       candidates: [],
@@ -296,23 +295,22 @@ export function matchRow(
     // White-letter / left-right / Pro variants often share the same
     // pattern+size+ply. If flags narrow it down to one, we can match safely.
     const coreFlagProducts = index.coreFlags.get(coreFlagsKey) ?? [];
-    if (coreFlagProducts.length === 1) {
+    if (coreFlagProducts.length === 1 && !diffTire(parsed, index.parsedProducts.get(coreFlagProducts[0].code)!).hasCritical) {
       const product = coreFlagProducts[0];
-      const warning = '商品资料缺少部分载重速度描述，按花纹/规格/层级/标识匹配，请核对';
+      const warning = `${diffTire(parsed, index.parsedProducts.get(product.code)!).summary}，请核对`;
       const trace = makeTrace(rowNumber, rawModel, parsed, {
         exactKey,
         coreKey,
         sizePatternKey,
         exactCount: 0,
         coreCount: coreProducts.length,
-        result: 'matched',
+        result: 'review',
         method: 'core',
-        matchedCode: product.code,
         warning,
         reason: warning,
       });
       return {
-        status: 'matched',
+        status: 'review',
         method: 'core',
         product,
         candidates: [],
@@ -372,14 +370,15 @@ export function matchRow(
     };
   }
 
-  const fuzzy = index.fuse.search(`${parsed.pattern} ${parsed.size} ${rawModel}`, { limit: 5 });
-  if (fuzzy.length > 0) {
-    const candidates: Candidate[] = fuzzy.map((hit) => ({
-      product: hit.item,
-      score: Math.round((1 - (hit.score ?? 1)) * 100),
-      reason: '品牌内模糊匹配候选',
-    }));
-    const reason = '自动匹配未命中，以下为品牌内模糊候选，请人工确认';
+  const missingProductReason = '未找到同品牌、同花纹、同规格商品，疑似未建档或型号写法不同。请人工核对；若确认是新品，请回业务系统新建商品，更新商品目录后重新匹配。';
+  const sameBrand = index.products.filter(product =>
+    normalizeBrand(index.parsedProducts.get(product.code)?.brand ?? product.brand) === normalizeBrand(parsed.brand));
+  const sameSize = sameBrand.filter(product => index.parsedProducts.get(product.code)?.size === parsed.size);
+  const nearPattern = sameSize.filter(product =>
+    samePatternFamily(index.parsedProducts.get(product.code)!.pattern, parsed.pattern));
+  if (nearPattern.length > 0) {
+    const candidates = rankCandidates(parsed, nearPattern, index);
+    const reason = '找到同品牌同规格、仅 EV 后缀不同的商品，可能为同款升级。请人工核对，确认前不自动对应。';
     const trace = makeTrace(rowNumber, rawModel, parsed, {
       exactKey,
       coreKey,
@@ -401,7 +400,9 @@ export function matchRow(
     };
   }
 
-  const reason = '商品资料中没有找到候选商品';
+  const references = rankCandidates(parsed, sameBrand.filter(product =>
+    index.parsedProducts.get(product.code)?.pattern === parsed.pattern), index);
+  const reason = `${missingProductReason}${sameSize.length ? ' 同规格但基础花纹不同的商品已排除。' : ''}${references.length ? ' 以下仅为同花纹其他规格的辅助参考。' : ''}`;
   const trace = makeTrace(rowNumber, rawModel, parsed, {
     exactKey,
     coreKey,
@@ -411,14 +412,40 @@ export function matchRow(
     result: 'unmatched',
     method: 'none',
     reason,
+    candidates: references,
   });
   return {
     status: 'unmatched',
     method: 'none',
-    candidates: [],
+    candidates: references,
     reason,
     parsed,
     trace,
+  };
+}
+
+export function matchRow(
+  rowNumber: number, rawModel: string, adapter: BrandAdapter,
+  index: BrandIndex, aliases: AliasMap, brand?: string,
+): MatchResult {
+  const result = matchParsedRow(rowNumber, rawModel, adapter, index, aliases, brand);
+  if (!result.product) return result;
+  const productParsed = index.parsedProducts.get(result.product.code);
+  const problems = [...(result.parsed?.issues ?? []), ...(productParsed?.issues ?? [])];
+  if (result.method !== 'alias') {
+    if (result.parsed?.unrecognized) problems.push(`厂家型号有未识别内容：${result.parsed.unrecognized}`);
+    if (productParsed?.unrecognized) problems.push(`商品规格有未识别内容：${productParsed.unrecognized}`);
+  }
+  if (!problems.length) return result;
+  const reason = `${problems.join('；')}。请人工核对商品规格后重新选择。`;
+  const comparison = result.parsed ?? productParsed;
+  const candidates = comparison ? [candidateScore(comparison, result.product, index)]
+    : [{ product: result.product, score: 0, reason }];
+  return {
+    ...result, status: 'review', method: 'candidate', product: undefined, reason, warning: undefined, candidates,
+    trace: makeTrace(rowNumber, rawModel, result.parsed, {
+      ...result.trace, result: 'review', method: 'candidate', matchedCode: undefined, warning: undefined, reason, candidates,
+    }),
   };
 }
 

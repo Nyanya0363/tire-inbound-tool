@@ -53,6 +53,8 @@ export function diffTire(manufacturer: ParsedTire, product: ParsedTire): TireDif
   const items: DiffItem[] = [];
   const reasons: string[] = [];
 
+  addItem(items, 'brand', '品牌', manufacturer.brand, product.brand, 'critical');
+
   addItem(items, 'pattern', '花纹', manufacturer.pattern, product.pattern, 'critical');
   addItem(items, 'size', '规格', manufacturer.size, product.size, 'critical');
   addItem(items, 'ply', '层级', manufacturer.ply, product.ply, 'critical');
@@ -73,7 +75,8 @@ export function diffTire(manufacturer: ParsedTire, product: ParsedTire): TireDif
     const left = manufacturerFlags.has(flag) ? flagLabel(flag) : '无';
     const right = productFlags.has(flag) ? flagLabel(flag) : '无';
     if (left === right) return;
-    addItem(items, `flag:${flag}`, `标识 ${flagLabel(flag)}`, left, right, 'descriptor');
+    addItem(items, `flag:${flag}`, `标识 ${flagLabel(flag)}`, left, right,
+      ['WHITE', 'LEFT', 'RIGHT'].includes(flag) ? 'critical' : 'descriptor');
     if (manufacturerFlags.has(flag) && !productFlags.has(flag)) {
       reasons.push(`商品资料缺少${flagLabel(flag)}`);
     } else if (!manufacturerFlags.has(flag) && productFlags.has(flag)) {

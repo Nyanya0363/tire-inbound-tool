@@ -1,4 +1,5 @@
 node_modules/
+/映射备份/
 dist/
 downloads/
 *.log

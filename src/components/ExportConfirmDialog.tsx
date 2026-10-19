@@ -9,6 +9,9 @@ interface ExportConfirmDialogProps {
   amount: number;
   priceField: string;
   supplierName: string;
+  newProductModels: string[];
+  skippedModels: string[];
+  onDownloadNewProducts: () => void;
   onConfirm: () => void;
   onClose: () => void;
 }
@@ -26,6 +29,9 @@ export function ExportConfirmDialog({
   amount,
   priceField,
   supplierName,
+  newProductModels,
+  skippedModels,
+  onDownloadNewProducts,
   onConfirm,
   onClose,
 }: ExportConfirmDialogProps) {
@@ -85,6 +91,20 @@ export function ExportConfirmDialog({
           {skippedRows > 0 && (
             <div className="alert warn">
               有 {skippedRows} 行不会写入导入模板。请确认这是预期结果。
+            </div>
+          )}
+          {newProductModels.length > 0 && (
+            <div className="alert warn">
+              <strong>有 {newProductModels.length} 行待新建商品，已排除在本次入库模板之外。</strong>
+              <ul>{newProductModels.map((model, index) => <li key={`${index}:${model}`}>{model}</li>)}</ul>
+              <p>请人工核对后回业务系统新建商品，更新目录后重新处理这些行。</p>
+              <button type="button" className="secondary" onClick={onDownloadNewProducts}>下载待新建商品清单</button>
+            </div>
+          )}
+          {skippedModels.length > 0 && (
+            <div className="alert warn">
+              <strong>以下 {skippedModels.length} 行已选择本次跳过，不写入入库模板：</strong>
+              <ul>{skippedModels.map((model, index) => <li key={index}>{model}</li>)}</ul>
             </div>
           )}
           <div className="export-actions">

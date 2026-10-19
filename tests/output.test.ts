@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as XLSX from 'xlsx';
-import { createImportWorkbook, createReportWorkbook } from '../src/core/excel';
+import { buildImportRows, createImportWorkbook, createNewProductWorkbook, createReportWorkbook } from '../src/core/excel';
 import type { ExportRow, MatchTrace } from '../src/core/types';
 
 const rows: ExportRow[] = [
@@ -16,6 +16,23 @@ const rows: ExportRow[] = [
 ];
 
 describe('output workbooks', () => {
+  it('excludes marked new products even if an old resolved entry still exists', () => {
+    const source = [
+      { rowNumber: 2, model: '165R14LT HD517', brand: '海大', unit: '条', qty: 2, price: 100, source: {} },
+      { rowNumber: 32, model: 'HAIDA 245/60R18 105H HI-SPIRIT', brand: '海大', unit: '条', qty: 4, price: 281.7441, source: {} },
+    ];
+    const resolved = new Map(source.map(row => [row.rowNumber, { code: 'SKU1', name: '轮胎', spec: '165R14LT HD517', unit: '条' }]));
+    const exported = buildImportRows(source, resolved, '供应商', new Set([32]));
+    expect(exported).toHaveLength(1);
+    expect(exported[0].qty).toBe(2);
+    const wb = createNewProductWorkbook([source[1]], '供应商', '底价');
+    const roundtrip = XLSX.read(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }), { type: 'array' });
+    const data = XLSX.utils.sheet_to_json<unknown[]>(roundtrip.Sheets[roundtrip.SheetNames[0]], { header: 1 });
+    expect(data[1]).toEqual([32, '供应商', '海大', source[1].model, '条', 4, 281.7441, '底价', '待新建商品',
+      '人工核对后回业务系统新建商品，更新商品目录后重新匹配；本行未写入入库导入模板。']);
+    expect(data[0]).not.toContain('商品编号');
+  });
+
   it('writes a readable xls import file with the fixed headers', () => {
     const wb = createImportWorkbook(rows);
     const data = XLSX.write(wb, { type: 'array', bookType: 'xls' });

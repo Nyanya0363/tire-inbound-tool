@@ -6,6 +6,7 @@ export interface BrandAdapter {
   supplierName: string;
   version: string;
   brandAliases: string[];
+  confirmedMappings?: Array<{ model: string; code: string; spec: string; brand: string; unit: string }>;
 
   inputAliases: {
     model: string[];
