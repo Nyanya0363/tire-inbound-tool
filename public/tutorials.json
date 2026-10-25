@@ -3,10 +3,10 @@
   "updatedAt": "2026-10-25",
   "tutorials": [
     {
-      "id": "inbound-quick-start-v1",
+      "id": "inbound-quick-start-v2",
       "title": "入库工具快速上手",
-      "description": "4分38秒｜中文配音与字幕，演示上传、差异核对、品牌搜索、待新建与跳过，以及导出前的检查。",
-      "url": "tutorials/inbound-quick-start-v1.mp4",
+      "description": "4分58秒｜中文配音与字幕，先展示可上传的脱敏 Excel 示例，再演示上传、差异核对、品牌搜索、待新建与跳过，以及导出前的检查。",
+      "url": "tutorials/inbound-quick-start-v2.mp4",
       "type": "video"
     }
   ]
