@@ -71,6 +71,20 @@ describe('order decisions and export', () => {
     expect(resolveResult(result, row, index).status).toBe('review');
   });
 
+  it('can mark a review row with an existing product as new, and undo without creating a memory', () => {
+    const result = matchRow(2, model + ' XL', adapter, index, {});
+    expect(result.status).toBe('review');
+    expect(result.product).toBeDefined();
+    const pendingNew = resolveResult(result, row, index, undefined, false, 'new');
+    expect(pendingNew.product).toBeUndefined();
+    expect(pendingNew.reason).toContain('待新建');
+    expect(pendingRows([pendingNew], { 2: true }, {})).toBe(0);
+    const restored = resolveResult(result, row, index);
+    expect(restored.status).toBe('review');
+    expect(restored.product?.code).toBe(product.code);
+    expect(pendingRows([restored], {}, {})).toBe(1);
+  });
+
   it('requires an explicit decision for every unresolved row and restores it when cancelled', () => {
     const missing = matchRow(2, '165R14LT 8PR 96/95Q HD999', adapter, index, {});
     expect(pendingRows([missing], {}, {})).toBe(1);

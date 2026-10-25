@@ -64,7 +64,7 @@ export function ExportConfirmDialog({
             ×
           </button>
         </div>
-        <div className="export-body">
+        <div className="export-body" role="region" aria-label="导出明细" tabIndex={0}>
           <div className="export-grid">
             <div>
               <span>将导出</span>
@@ -107,14 +107,14 @@ export function ExportConfirmDialog({
               <ul>{skippedModels.map((model, index) => <li key={index}>{model}</li>)}</ul>
             </div>
           )}
-          <div className="export-actions">
-            <button type="button" className="primary" onClick={onConfirm}>
-              确认下载
-            </button>
-            <button type="button" className="secondary" onClick={onClose}>
-              返回检查
-            </button>
-          </div>
+        </div>
+        <div className="export-actions">
+          <button type="button" className="primary" onClick={onConfirm}>
+            确认下载
+          </button>
+          <button type="button" className="secondary" onClick={onClose}>
+            返回检查
+          </button>
         </div>
       </div>
     </div>

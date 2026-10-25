@@ -1424,7 +1424,7 @@ export default function App() {
                                 setSkipped(prev => ({ ...prev, [result.trace.rowNumber]: !prev[result.trace.rowNumber] }));
                                 setNewProducts(prev => ({ ...prev, [result.trace.rowNumber]: false }));
                               }}>{skipped[result.trace.rowNumber] ? '取消跳过' : '本次跳过'}</button>
-                              {(newProducts[result.trace.rowNumber] || (!result.product && result.reason?.includes('疑似未建档'))) && (
+                              {(newProducts[result.trace.rowNumber] || (result.status !== 'matched' && !row?.validationErrors?.length)) && (
                                 <button type="button" className="row-action" onClick={() => {
                                   setSkipped(prev => ({ ...prev, [result.trace.rowNumber]: false }));
                                   setNewProducts(prev => ({ ...prev, [result.trace.rowNumber]: !prev[result.trace.rowNumber] }));
