@@ -1,7 +1,7 @@
 {
-  "version": "57a398793c0d",
-  "generatedAt": "2026-10-17T05:21:02.658Z",
-  "sourceFile": "商品资料 测试用).xls",
+  "version": "f2b22cd15b5b",
+  "generatedAt": "2026-10-25T11:23:09.910Z",
+  "sourceFile": "商品资料 (1).xls",
   "products": [
     {
       "code": "BH005308",
@@ -378,14 +378,6 @@
       "brand": "耐克森",
       "unit": "条",
       "barcode": "RH723565H7RH7"
-    },
-    {
-      "code": "16026NXC",
-      "name": "轮胎（耐克森）",
-      "spec": "RH7 235/55R19H",
-      "brand": "耐克森",
-      "unit": "条",
-      "barcode": "RH72355519RH7"
     },
     {
       "code": "CBPTH20122J17VX0",
@@ -1888,8 +1880,8 @@
       "name": "轮胎(海大)",
       "spec": "HD517 175R14LT 6PR 94/92R",
       "brand": "海大",
-      "unit": "件",
-      "barcode": ""
+      "unit": "条",
+      "barcode": "517175145176PR"
     },
     {
       "code": "HD517-185/65R14XL",
@@ -2768,7 +2760,7 @@
       "name": "轮胎(海大)",
       "spec": "195R15C8PR HD717 106/104S",
       "brand": "海大",
-      "unit": "件",
+      "unit": "条",
       "barcode": "71719515717"
     },
     {
@@ -4584,7 +4576,7 @@
       "name": "轮胎（海大）",
       "spec": "245/60R18 HD837 105H",
       "brand": "海大",
-      "unit": "件",
+      "unit": "条",
       "barcode": "8372456018837"
     },
     {
@@ -5870,7 +5862,7 @@
     {
       "code": "HD937-H245/45ZR20XL",
       "name": "轮胎 （海大）",
-      "spec": "H245/45ZR20XL HD937 103V",
+      "spec": "H245/45ZR20XL HD937EV 103V",
       "brand": "海大",
       "unit": "条",
       "barcode": "9372454520937"
@@ -6548,6 +6540,14 @@
       "barcode": "m8773157017877"
     },
     {
+      "code": "MK877-P265/70R16",
+      "name": "轮胎（迈劲）",
+      "spec": "P265/70R16 112T mk877",
+      "brand": "迈劲",
+      "unit": "条",
+      "barcode": "m8772657016877"
+    },
+    {
       "code": "TF877-LT245/65R17",
       "name": "轮胎（天府）",
       "spec": "LT245/65R17 8PR白字 TF877 pro",
@@ -7140,6 +7140,14 @@
       "barcode": "hi2357016hi"
     },
     {
+      "code": "HI-245/60R18",
+      "name": "轮胎（海大）",
+      "spec": "245/60R18 105H HI-SPIRIT",
+      "brand": "海大",
+      "unit": "条",
+      "barcode": "hi2456018hi"
+    },
+    {
       "code": "HI-245/65R17",
       "name": "轮胎（海大）",
       "spec": "245/65R17 111H XL HI-SPIRIT",
@@ -7210,6 +7218,22 @@
       "brand": "海大",
       "unit": "件",
       "barcode": "62718514627"
+    },
+    {
+      "code": "mk627-175/75R14C",
+      "name": "轮胎（迈劲）",
+      "spec": "175/75R14C 8PR 99/98Q mk627",
+      "brand": "迈劲",
+      "unit": "件",
+      "barcode": "mk6271757514627mk"
+    },
+    {
+      "code": "mk627-195/70R15C",
+      "name": "轮胎（迈劲）",
+      "spec": "195/70R15C 8PR 104/102R mk627",
+      "brand": "迈劲",
+      "unit": "件",
+      "barcode": "mk6271957015627mk"
     },
     {
       "code": "YL20",
@@ -12502,7 +12526,7 @@
     {
       "code": "BH002920",
       "name": "轮胎（玲珑）",
-      "spec": "225/60R18",
+      "spec": "195/75R16 8PR",
       "brand": "玲珑",
       "unit": "件",
       "barcode": ""
@@ -12510,7 +12534,7 @@
     {
       "code": "BH002961",
       "name": "轮胎（玲珑）",
-      "spec": "205/55R16",
+      "spec": "195/65R15",
       "brand": "玲珑",
       "unit": "件",
       "barcode": ""
@@ -12569,6 +12593,14 @@
       "spec": "165/70R13LT",
       "brand": "玲珑",
       "unit": "条",
+      "barcode": ""
+    },
+    {
+      "code": "BH007536",
+      "name": "轮胎（玲珑）",
+      "spec": "195/70R15 12PR",
+      "brand": "玲珑",
+      "unit": "件",
       "barcode": ""
     },
     {
@@ -16762,6 +16794,14 @@
       "brand": "耐克森",
       "unit": "条",
       "barcode": "RH723560H7RH7"
+    },
+    {
+      "code": "16026NXC",
+      "name": "轮胎（耐克森）",
+      "spec": "RH7 235/55R19H",
+      "brand": "耐克森",
+      "unit": "条",
+      "barcode": "RH72355519RH7"
     },
     {
       "code": "16525NXC",
@@ -23548,6 +23588,14 @@
       "barcode": "ev2022455019202ev"
     },
     {
+      "code": "CBPTH20224K19Y9JPF12",
+      "name": "轮胎（三角）",
+      "spec": "245/50R19(TH202)105Y 三角 EV静音棉",
+      "brand": "三角",
+      "unit": "条",
+      "barcode": "2022455019202jy"
+    },
+    {
       "code": "CBPTH20224K19YFJ",
       "name": "轮胎（三角）",
       "spec": "245/50R19(TH202)105Y 三角欧盟",
@@ -23636,7 +23684,7 @@
       "barcode": "2022454520202ev"
     },
     {
-      "code": "CBPTH20224L20Y9JPF11",
+      "code": "CBPTH20224L20Y9JPF12",
       "name": "轮胎（三角）",
       "spec": "245/45R20(TH202)103Y EV静音轮胎01",
       "brand": "三角",
@@ -23778,6 +23826,14 @@
       "brand": "三角",
       "unit": "条",
       "barcode": "2022555520202"
+    },
+    {
+      "code": "CBPTH20225K19Y9JPF12",
+      "name": "轮胎（三角）",
+      "spec": "255/50R19(TH202)107Y 三角静音棉轮",
+      "brand": "三角",
+      "unit": "条",
+      "barcode": "2022555019202jy"
     },
     {
       "code": "CBPTH20225K19YFJ",
@@ -24004,20 +24060,20 @@
       "barcode": "2022654520202evjy"
     },
     {
+      "code": "CBPTH20226L21W9JPF12",
+      "name": "轮胎（三角）",
+      "spec": "265/45R21(TH202)108W 三角欧盟EV静音轮",
+      "brand": "三角",
+      "unit": "条",
+      "barcode": "2022654521202evjy"
+    },
+    {
       "code": "CBPTH20226L21WFJ",
       "name": "轮胎（三角）",
       "spec": "265/45R21(TH202)108W 三角EV",
       "brand": "三角",
       "unit": "条",
       "barcode": "2022654521202"
-    },
-    {
-      "code": "CBPTH20226L21WFJPF11",
-      "name": "轮胎（三角）",
-      "spec": "265/45R21(TH202)108W 三角欧盟EV静音轮",
-      "brand": "三角",
-      "unit": "条",
-      "barcode": "2022654521202evjy"
     },
     {
       "code": "CBPTH20226M20W9J",
@@ -25052,6 +25108,14 @@
       "barcode": "8012255518801"
     },
     {
+      "code": "CBPTH80122J19V9J",
+      "name": "轮胎（三角）",
+      "spec": "225/55R19(TH801)103V 三角 EV",
+      "brand": "三角",
+      "unit": "条",
+      "barcode": "8012255519801"
+    },
+    {
       "code": "CBPTH80122K17VF0",
       "name": "轮胎（三角）",
       "spec": "225/50R17(TH801)98V 三角",
@@ -25258,6 +25322,22 @@
       "brand": "三角",
       "unit": "条",
       "barcode": "8022255517802"
+    },
+    {
+      "code": "CBPTS60323H19H9J",
+      "name": "轮胎（三角）",
+      "spec": "235/60R19(TS603)107H 三角EVPLUS",
+      "brand": "三角",
+      "unit": "条",
+      "barcode": "6032356019603"
+    },
+    {
+      "code": "CBPTS60327J20HI0",
+      "name": "轮胎（三角）",
+      "spec": "275/55R20(TS603)117H EV",
+      "brand": "三角",
+      "unit": "条",
+      "barcode": "6032755520603"
     },
     {
       "code": "CBPTS60328G18HI0",
@@ -31842,22 +31922,6 @@
       "brand": "迈劲",
       "unit": "件",
       "barcode": ""
-    },
-    {
-      "code": "mk627-175/75R14C",
-      "name": "轮胎（迈劲）",
-      "spec": "175/75R14C 8PR 99/98Q mk627",
-      "brand": "迈劲",
-      "unit": "件",
-      "barcode": "mk6271757514627mk"
-    },
-    {
-      "code": "mk627-195/70R15C",
-      "name": "轮胎（迈劲）",
-      "spec": "195/70R15C 8PR 104/102R mk627",
-      "brand": "迈劲",
-      "unit": "件",
-      "barcode": "mk6271957015627mk"
     },
     {
       "code": "BH007505",
