@@ -18,11 +18,11 @@ const TABS = [
 type TabId = (typeof TABS)[number]['id'];
 
 export function HelpDialog({ open, tutorials, onClose }: HelpDialogProps) {
-  const [tab, setTab] = useState<TabId>('flow');
+  const [tab, setTab] = useState<TabId>('videos');
 
   useEffect(() => {
     if (!open) return;
-    setTab('flow');
+    setTab('videos');
     const handler = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
     };
@@ -178,7 +178,7 @@ export function HelpDialog({ open, tutorials, onClose }: HelpDialogProps) {
               <h3>视频教程</h3>
               {tutorials.length === 0 ? (
                 <div className="help-note">
-                  还没有视频教程。管理员可以在页面底部的“教程视频管理”里添加链接。
+                  视频教程暂时无法加载，请刷新页面后重试。
                 </div>
               ) : (
                 <div className="tutorial-list">
@@ -204,9 +204,6 @@ export function HelpDialog({ open, tutorials, onClose }: HelpDialogProps) {
                   ))}
                 </div>
               )}
-              <div className="help-note">
-                视频文件建议放在 B 站、GitHub Release 或云存储，再填写链接；不要直接把大视频提交到 GitHub Pages。
-              </div>
             </section>
           )}
         </div>

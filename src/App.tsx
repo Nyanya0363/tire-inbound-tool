@@ -9,7 +9,6 @@ import { HelpDialog } from './components/HelpDialog';
 import { MappingManager } from './components/MappingManager';
 import { ProductPicker } from './components/ProductPicker';
 import { RecentHistory } from './components/RecentHistory';
-import { TutorialAdmin } from './components/TutorialAdmin';
 import { brandAdapters, getBrandAdapter } from './brands';
 import type { BrandAdapter } from './brands/types';
 import { loadCatalog } from './core/catalog';
@@ -890,7 +889,7 @@ export default function App() {
             className="help-button"
             onClick={() => setHelpOpen(true)}
           >
-            帮助 / 教程
+            查看教程
           </button>
           <span>v{__APP_VERSION__}</span>
           <span>{__COMMIT_SHA__.slice(0, 7)}</span>
@@ -1510,8 +1509,6 @@ export default function App() {
         onCatalogReady={(nextCatalog) => setCatalog(nextCatalog)}
       />
 
-      <TutorialAdmin tutorials={tutorials} onChange={setTutorials} />
-
       <MappingManager
         aliases={aliases}
         products={index?.products ?? []}
@@ -1537,7 +1534,7 @@ export default function App() {
         </div>
         <div className="footer-actions">
           <button type="button" className="link-button" onClick={() => setHelpOpen(true)}>
-            帮助 / 教程
+            查看教程
           </button>
           <button type="button" className="link-button" onClick={downloadDiagnostics}>
             下载诊断日志
