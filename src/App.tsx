@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
 import { CatalogAdmin } from './components/CatalogAdmin';
 import { DiffDialog } from './components/DiffDialog';
+import { MatchReasons } from './components/MatchReasons';
+import { comparisonExplanations } from './core/explanations';
 import { ExportConfirmDialog } from './components/ExportConfirmDialog';
 import { HelpDialog } from './components/HelpDialog';
 import { MappingManager } from './components/MappingManager';
@@ -159,6 +161,7 @@ export default function App() {
   const [reviewGroup, setReviewGroup] = useState<string>('all');
   const [showMapping, setShowMapping] = useState(false);
   const [diffRow, setDiffRow] = useState<number | null>(null);
+  const [diffCandidate, setDiffCandidate] = useState<string | null>(null);
   const [exportFormat, setExportFormat] = useState<'xlsx' | 'xls' | null>(null);
   const [lastExport, setLastExport] = useState<{ fileName: string; rows: number } | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>(() => loadHistory());
@@ -192,7 +195,7 @@ export default function App() {
     setFilter('all');
     setReviewGroup('all');
     setShowMapping(false);
-    setDiffRow(null);
+    setDiffRow(null); setDiffCandidate(null);
     setExportFormat(null);
     setLastExport(null);
   }, [catalog]);
@@ -212,7 +215,7 @@ export default function App() {
     setFilter('all');
     setReviewGroup('all');
     setShowMapping(false);
-    setDiffRow(null);
+    setDiffRow(null); setDiffCandidate(null);
     setExportFormat(null);
     setLastExport(null);
     setError('');
@@ -236,7 +239,7 @@ export default function App() {
     setMapping(next);
     setRows([]); setResults([]); setManual({}); setConfirmed({});
     setNewProducts({}); setSkipped({}); setExportFormat(null);
-    setDiffRow(null); setPickerRow(null); setLastExport(null);
+    setDiffRow(null); setDiffCandidate(null); setPickerRow(null); setLastExport(null);
     setError('列映射已更改，请重新点击“开始匹配”，再核对并导出。');
   }
 
@@ -475,10 +478,16 @@ export default function App() {
     };
   }, [rows, resolvedMap]);
 
-  const selectedDiff = diffRow !== null ? diffs.get(diffRow) : undefined;
   const selectedDiffResult = diffRow !== null
-    ? effectiveResults.find((result) => result.trace.rowNumber === diffRow)
-    : undefined;
+    ? effectiveResults.find(result => result.trace.rowNumber === diffRow) : undefined;
+  const selectedDiffProduct = diffCandidate ? index?.byCode.get(diffCandidate) : selectedDiffResult?.product;
+  const selectedProductParsed = selectedDiffProduct ? index?.parsedProducts.get(selectedDiffProduct.code) : undefined;
+  const selectedDiff = selectedDiffResult?.parsed && selectedProductParsed
+    ? diffTire(selectedDiffResult.parsed, selectedProductParsed) : undefined;
+  const selectedExplanations = diffCandidate
+    ? selectedDiffResult?.candidates.find(c => c.product.code === diffCandidate)?.explanations
+      ?? comparisonExplanations(selectedDiffResult?.parsed, selectedProductParsed)
+    : selectedDiffResult?.explanations;
 
   const pickerProduct = useMemo(() => {
     if (pickerRow === null || !index) return undefined;
@@ -517,7 +526,7 @@ export default function App() {
       setFilter('all');
       setReviewGroup('all');
       setShowMapping(false);
-      setDiffRow(null);
+      setDiffRow(null); setDiffCandidate(null);
       setExportFormat(null);
       setLastExport(null);
       logger.event('info', 'file_loaded', {
@@ -590,6 +599,7 @@ export default function App() {
           warning: result.trace.warning,
           reason: result.trace.reason,
           candidates: result.trace.candidates,
+          explanations: result.trace.explanations,
         });
       });
       setRows(inboundRows);
@@ -601,7 +611,7 @@ export default function App() {
       setSkipped({});
       setFilter('all');
       setReviewGroup('all');
-      setDiffRow(null);
+      setDiffRow(null); setDiffCandidate(null);
       setExportFormat(null);
       setLastExport(null);
       const matched = nextResults.filter((result) => result.status === 'matched').length;
@@ -661,6 +671,7 @@ export default function App() {
       aliasKey,
     });
     setPickerRow(null);
+    return true;
   }
 
   function clearManual(rowNumber: number) {
@@ -825,7 +836,7 @@ export default function App() {
     setFilter('all');
     setReviewGroup('all');
     setShowMapping(false);
-    setDiffRow(null);
+    setDiffRow(null); setDiffCandidate(null);
     setExportFormat(null);
     setLastExport(null);
     setError('');
@@ -1398,22 +1409,29 @@ export default function App() {
                           </td>
                           <td>
                             <div className="reason-line">
-                              {result.reason ?? result.warning ?? methodLabel(result)}
+                              {result.status === 'matched' || !result.explanations?.length ? result.reason ?? result.warning ?? methodLabel(result) : null}
                             </div>
+                            <MatchReasons items={result.explanations} />
+                            {result.status === 'review' && <p className="match-next-step">{result.explanations?.some(item => item.code === 'numeric_error')
+                              ? '请修正原表后重新上传，或明确选择本次跳过。'
+                              : result.method === 'core' ? '请核对差异，确认同一款后点击“确认核对”；也可改选商品或标记待新建。'
+                              : '请先查看差异；核实后选择商品，确认未建档后可标记待新建。'}</p>}
                             {result.status !== 'matched' && result.candidates.length > 0 && (
                               <div className="candidate-row">
                                 {result.candidates.slice(0, 3).map((candidate) => (
-                                  <button
-                                    type="button"
-                                    key={candidate.product.code}
-                                    className="candidate-chip"
-                                    title={`${candidate.product.code} ${candidate.product.spec}`}
-                                    onClick={() => selectProduct(result.trace.rowNumber, candidate.product)}
-                                  >
+                                  <div key={candidate.product.code} className="candidate-chip">
                                     <span className="candidate-spec-main">{candidate.product.spec}</span>
-                                    <small className="candidate-code-sub">{candidate.product.code}</small>
-                                    <small className="candidate-difference">{candidate.reason}</small>
-                                  </button>
+                                    <small className="candidate-code-sub">SKU：{candidate.product.code}</small>
+                                    {result.status === 'unmatched' && <small>同花纹其他规格，仅供参考</small>}
+                                    <MatchReasons items={candidate.explanations} compact />
+                                    {!candidate.explanations?.length && <small className="candidate-difference">{candidate.reason}</small>}
+                                    <div className="candidate-actions">
+                                      <button type="button" className="row-action" onClick={() => {
+                                        setDiffCandidate(candidate.product.code); setDiffRow(result.trace.rowNumber);
+                                      }}>查看差异</button>
+                                      <button type="button" className="row-action row-action-primary" onClick={() => selectProduct(result.trace.rowNumber, candidate.product)}>选择此商品</button>
+                                    </div>
+                                  </div>
                                 ))}
                               </div>
                             )}
@@ -1446,7 +1464,7 @@ export default function App() {
                                   <button
                                     type="button"
                                     className="row-action"
-                                    onClick={() => setDiffRow(result.trace.rowNumber)}
+                                    onClick={() => { setDiffCandidate(null); setDiffRow(result.trace.rowNumber); }}
                                   >
                                     查看差异
                                   </button>
@@ -1547,6 +1565,8 @@ export default function App() {
         open={pickerRow !== null}
         products={index?.products ?? []}
         selectedCode={pickerProduct?.code}
+        sourceModel={effectiveResults.find(result => result.trace.rowNumber === pickerRow)?.trace.rawModel}
+        sourceBrand={effectiveResults.find(result => result.trace.rowNumber === pickerRow)?.parsed?.brand}
         onSelect={(product) => {
           if (pickerRow !== null) selectProduct(pickerRow, product);
         }}
@@ -1556,17 +1576,24 @@ export default function App() {
       <DiffDialog
         open={diffRow !== null}
         rawModel={selectedDiffResult?.trace.rawModel ?? ''}
-        productCode={selectedDiffResult?.product?.code}
-        productSpec={selectedDiffResult?.product?.spec}
+        productCode={selectedDiffProduct?.code}
+        productSpec={selectedDiffProduct?.spec}
         diff={selectedDiff}
+        explanations={selectedExplanations}
+        manufacturer={selectedDiffResult?.parsed ?? undefined}
+        product={selectedProductParsed}
+        candidate={diffCandidate !== null}
         confirmed={diffRow !== null ? Boolean(confirmed[diffRow]) : false}
         onConfirm={() => {
-          if (diffRow !== null) toggleConfirm(diffRow);
+          if (diffRow === null) return;
+          if (diffCandidate && selectedDiffProduct) {
+            if (selectProduct(diffRow, selectedDiffProduct)) { setDiffRow(null); setDiffCandidate(null); }
+          } else toggleConfirm(diffRow);
         }}
         onReselect={() => {
           if (diffRow !== null) {
             setPickerRow(diffRow);
-            setDiffRow(null);
+            setDiffRow(null); setDiffCandidate(null);
           }
         }}
         onClose={() => setDiffRow(null)}

@@ -6,10 +6,13 @@ import type { Catalog } from '../src/core/types';
 
 const catalog = JSON.parse(readFileSync('public/catalog.json', 'utf8')) as Catalog;
 const index = buildBrandIndex(catalog, haidaAdapter);
+// Keep the missing-product scenario stable when the live catalog is updated.
+const missingIndex = buildBrandIndex({ ...catalog, products: catalog.products.filter(product =>
+  product.code !== 'HI-245/60R18') }, haidaAdapter);
 
 describe('October 17 order parsing regressions', () => {
   it('prompts for manual new-product identification when the ordered product is absent', () => {
-    const result = matchRow(32, 'HAIDA 245/60R18 105H HI-SPIRIT', haidaAdapter, index, {}, '海大');
+    const result = matchRow(32, 'HAIDA 245/60R18 105H HI-SPIRIT', haidaAdapter, missingIndex, {}, '海大');
     expect(result.reason).toContain('疑似未建档');
     expect(result.reason).toContain('人工核对');
     expect(result.reason).toContain('回业务系统新建');
@@ -60,7 +63,7 @@ describe('October 17 order parsing regressions', () => {
     'HAIDA 235/45ZR20 100W XL HD937EV',
     'HAIDA 245/60R18 105H HI-SPIRIT',
   ])('keeps variant differences or missing sizes for review: %s', model => {
-    const result = matchRow(1, model, haidaAdapter, index, {}, '海大');
+    const result = matchRow(1, model, haidaAdapter, missingIndex, {}, '海大');
     expect(result.parsed).not.toBeNull();
     expect(result.status).not.toBe('matched');
     expect(result.product).toBeUndefined();

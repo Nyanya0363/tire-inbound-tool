@@ -75,7 +75,7 @@ describe('specification-led matching', () => {
     expect(result.candidates.map(c => c.product.code)).toEqual(['SKU1']);
     expect(result.candidates[0].reason).toContain('花纹不一致');
     expect(result.candidates[0].reason).toContain('HD501EV');
-    expect(result.reason).toContain('仅 EV 后缀不同');
+    expect(result.reason).toContain('EV 后缀不同');
     expect(result.product).toBeUndefined();
   });
 

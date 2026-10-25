@@ -62,7 +62,8 @@ describe('real catalog model variations', () => {
 
   it('does not merge a different ply or named pattern', () => {
     expect(matchRow(1, 'HAIDA 11R22.5 18PR 146/143M HD158', haidaAdapter, index, {}).status).not.toBe('matched');
-    const result = matchRow(1, 'HAIDA 245/60R18 105H HI-SPIRIT', haidaAdapter, index, {});
+    const absent = buildBrandIndex({ ...catalog, products: catalog.products.filter(product => product.code !== 'HI-245/60R18') }, haidaAdapter);
+    const result = matchRow(1, 'HAIDA 245/60R18 105H HI-SPIRIT', haidaAdapter, absent, {});
     expect(result.status).toBe('unmatched');
     expect(result.candidates.every(candidate => index.parsedProducts.get(candidate.product.code)?.pattern === 'HI-SPIRIT')).toBe(true);
     expect(result.candidates.some(candidate => candidate.product.code === 'HD837-H245/60R18')).toBe(false);

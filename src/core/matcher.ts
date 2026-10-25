@@ -1,6 +1,7 @@
 import type { BrandAdapter } from '../brands/types';
 import type { Candidate, Catalog, MatchResult, MatchTrace, ParsedTire, Product } from './types';
 import { diffTire } from './diff';
+import { explainMatch } from './explanations';
 import { aliasCode, aliasIsCurrent, findAlias, rememberAlias } from './aliases';
 import type { AliasMap } from './aliases';
 export type { AliasMap } from './aliases';
@@ -205,6 +206,7 @@ function matchParsedRow(
         && (!parsed || samePatternFamily(parsed.pattern, index.parsedProducts.get(product.code)?.pattern ?? '')));
     const candidates = parsed ? rankCandidates(parsed, products, index) : products.map(product => ({ product, score: 0, reason }));
     return { status: 'review', method: 'candidate', parsed, candidates, reason,
+      explanations: [{ code: 'memory_review', message: reason }],
       trace: makeTrace(rowNumber, rawModel, parsed, { exactKey, coreKey, sizePatternKey, exactCount: 0, coreCount: 0,
         result: 'review', method: 'candidate', reason, candidates }) };
   }
@@ -378,7 +380,7 @@ function matchParsedRow(
     samePatternFamily(index.parsedProducts.get(product.code)!.pattern, parsed.pattern));
   if (nearPattern.length > 0) {
     const candidates = rankCandidates(parsed, nearPattern, index);
-    const reason = '找到同品牌同规格、仅 EV 后缀不同的商品，可能为同款升级。请人工核对，确认前不自动对应。';
+    const reason = '找到同品牌同规格、EV 后缀不同的候选商品，可能为同款升级。其他参数也需核对，确认前不自动对应。';
     const trace = makeTrace(rowNumber, rawModel, parsed, {
       exactKey,
       coreKey,
@@ -424,7 +426,7 @@ function matchParsedRow(
   };
 }
 
-export function matchRow(
+function matchCheckedRow(
   rowNumber: number, rawModel: string, adapter: BrandAdapter,
   index: BrandIndex, aliases: AliasMap, brand?: string,
 ): MatchResult {
@@ -449,6 +451,13 @@ export function matchRow(
   };
 }
 
+export function matchRow(
+  rowNumber: number, rawModel: string, adapter: BrandAdapter,
+  index: BrandIndex, aliases: AliasMap, brand?: string,
+): MatchResult {
+  return explainMatch(matchCheckedRow(rowNumber, rawModel, adapter, index, aliases, brand), index.parsedProducts);
+}
+
 export function unsupportedBrandResult(
   rowNumber: number,
   rawModel: string,
@@ -471,7 +480,8 @@ export function unsupportedBrandResult(
     candidates: [],
     reason,
     parsed: null,
-    trace,
+    explanations: [{ code: 'unsupported_brand', message: reason }],
+    trace: { ...trace, explanations: [{ code: 'unsupported_brand', message: reason }] },
   };
 }
 

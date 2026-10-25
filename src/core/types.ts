@@ -30,6 +30,18 @@ export interface Candidate {
   product: Product;
   score: number;
   reason: string;
+  explanations?: MatchExplanation[];
+}
+
+export type ExplanationCode = 'ev_difference' | 'parameter_difference' | 'field_missing'
+  | 'unrecognized' | 'data_conflict' | 'multiple_matches' | 'not_found' | 'parse_error'
+  | 'numeric_error' | 'memory_review' | 'unsupported_brand';
+
+export interface MatchExplanation {
+  code: ExplanationCode;
+  message: string;
+  field?: string;
+  side?: 'manufacturer' | 'product';
 }
 
 export type MatchStatus = 'matched' | 'review' | 'unmatched';
@@ -49,11 +61,13 @@ export interface MatchTrace {
   matchedCode?: string;
   warning?: string;
   reason?: string;
+  explanations?: MatchExplanation[];
   candidates: Array<{
     code: string;
     spec: string;
     score: number;
     reason: string;
+    explanations?: MatchExplanation[];
   }>;
   error?: string;
 }
@@ -65,6 +79,7 @@ export interface MatchResult {
   candidates: Candidate[];
   warning?: string;
   reason?: string;
+  explanations?: MatchExplanation[];
   parsed: ParsedTire | null;
   trace: MatchTrace;
 }

@@ -104,7 +104,7 @@ export function HelpDialog({ open, tutorials, onClose }: HelpDialogProps) {
                 <li><strong>人工映射记忆</strong>：型号字段或原文命中，且商品规格、品牌、单位快照仍一致时复用；旧记忆或商品变化需要重新核对。</li>
                 <li><strong>严格匹配</strong>：品牌、花纹、规格、层级、载重速度、标识全部一致。</li>
                 <li><strong>核心匹配</strong>：品牌 + 花纹 + 规格 + 层级唯一命中，但描述有差异，标为“需确认”。</li>
-                <li><strong>候选匹配</strong>：同花纹同规格有多个商品，或层级/载重速度不一致，不自动落库，交给人工选择。</li>
+                <li><strong>候选匹配</strong>：可先点“查看差异”核对双方字段；查看不会保存记忆。“选择此商品”才进入人工确认流程。</li>
                 <li><strong>花纹核对</strong>：基础花纹不同的商品直接排除。仅 EV 后缀不同可能是同款升级，需人工核对后保存；同花纹其他尺寸仅为辅助参考。疑似未建档需要人工核实后回系统新建。</li>
               </ol>
               <div className="help-note warn-note">

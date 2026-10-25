@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { formatExplanations } from './explanations';
 import type { BrandAdapter } from '../brands/types';
 import type {
   ExportRow,
@@ -403,9 +404,11 @@ export function createReportWorkbook(traces: MatchTrace[], catalogVersion: strin
       STATUS_LABEL[trace.result] ?? trace.result,
       trace.matchedCode ?? '',
       METHOD_LABEL[trace.method] ?? trace.method,
-      trace.reason ?? trace.warning ?? '',
+      trace.result === 'matched'
+        ? [trace.reason ?? trace.warning ?? '', formatExplanations(trace.explanations)].filter(Boolean).join('；')
+        : formatExplanations(trace.explanations) || trace.reason || trace.warning || '',
       trace.candidates
-        .map((candidate) => `${candidate.code}(${candidate.score}) ${candidate.reason}`)
+        .map((candidate) => `${candidate.code}(${candidate.score}) ${formatExplanations(candidate.explanations) || candidate.reason}`)
         .join(' | '),
       catalogVersion,
     ]),

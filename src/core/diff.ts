@@ -35,6 +35,10 @@ function flagLabel(flag: string): string {
   return FLAG_LABELS[flag] ?? flag;
 }
 
+export function formatFlags(flags: string[]): string {
+  return flags.map(flagLabel).join('、') || '未标注';
+}
+
 function addItem(
   items: DiffItem[],
   field: string,
