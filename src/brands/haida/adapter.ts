@@ -14,7 +14,7 @@ import {
 } from '../../core/text';
 
 const BRAND = '海大';
-const ADAPTER_VERSION = 'haida-4';
+const ADAPTER_VERSION = 'haida-5';
 
 function canonicalBrand(value: string): string {
   const brand = normalizeBrand(value);
@@ -25,7 +25,7 @@ function canonicalBrand(value: string): string {
 
 function extractSupplierPattern(text: string) {
   const normalized = normalizeText(text);
-  const match = normalized.match(/(?:TF\s*\d+[A-Z]*|RD\s*-?\s*\d+[A-Z]*|HI[\s-]*SPIRIT|EX[\s-]*COMFORT|RUN[\s-]*SPIRIT)/);
+  const match = normalized.match(/(?:MK\s*\d+[A-Z]*|TF\s*\d+[A-Z]*|RD\s*-?\s*\d+[A-Z]*|HI[\s-]*SPIRIT|EX[\s-]*COMFORT|RUN[\s-]*SPIRIT)/);
   if (!match) return extractPattern(text);
   let pattern = match[0].replace(/\s+/g, '').replace(/^RD-?/, 'RD-');
   pattern = pattern.replace(/^HI-?SPIRIT$/, 'HI-SPIRIT').replace(/^EX-?COMFORT$/, 'EX-COMFORT').replace(/^RUN-?SPIRIT$/, 'RUNSPIRIT');
@@ -55,7 +55,7 @@ function removePattern(text: string, pattern: string): string {
 function parsePatternFromCode(code: string): { pattern: string; flags: string[] } | null {
   const compact = normalizeText(code).replace(/\s+/g, '');
   const prefix = compact.split('-')[0] ?? '';
-  const match = prefix.match(/^HD\d+[A-Z]*/);
+  const match = prefix.match(/^(?:HD|MK)\d+[A-Z]*/);
   if (!match) return null;
 
   let pattern = match[0];
@@ -69,11 +69,12 @@ function parsePatternFromCode(code: string): { pattern: string; flags: string[] 
 
 function parseInbound(raw: string, brand?: string): ParsedTire {
   const normalized = normalizeText(raw);
-  const embeddedBrand = /\bTIANFU\b|天府/.test(normalized) ? '天府'
+  const embeddedBrand = /\bMILEKING\b|迈劲/.test(normalized) ? '迈劲'
+    : /\bTIANFU\b|天府/.test(normalized) ? '天府'
     : /\bHAIDA\b|海大/.test(normalized) ? BRAND : undefined;
   const issues = brand && embeddedBrand && canonicalBrand(brand) !== embeddedBrand
     ? [`厂家型号品牌 ${embeddedBrand} 与品牌列 ${canonicalBrand(brand)} 冲突`] : [];
-  const clean = normalized.replace(/\b(?:HAIDA|TIANFU)\b|海大|天府/g, ' ')
+  const clean = normalized.replace(/\b(?:HAIDA|TIANFU|MILEKING)\b|海大|天府|迈劲/g, ' ')
     .replace(/\bH(?=\d{3})/g, '');
   const patternMatch = extractSupplierPattern(clean);
   const sizeToken = extractSizeToken(patternMatch ? removePattern(clean, patternMatch.pattern) : clean);
@@ -102,11 +103,8 @@ function parseInbound(raw: string, brand?: string): ParsedTire {
     .replace(/[()（）\[\]，,;；:：-]/g, '');
 
   return {
-    brand: brand ? canonicalBrand(brand) : (
-      /TIANFU|天府/.test(normalized) ? '天府'
-        : /HAIDA|海大/.test(normalized) ? BRAND
-        : /^(?:TF|RD-)/.test(patternMatch.pattern) ? '天府' : BRAND
-    ),
+    brand: brand ? canonicalBrand(brand) : embeddedBrand
+      ?? (/^MK/.test(patternMatch.pattern) ? '迈劲' : /^(?:TF|RD-)/.test(patternMatch.pattern) ? '天府' : BRAND),
     pattern: patternMatch.pattern,
     size,
     ply,
@@ -126,6 +124,9 @@ function parseProduct(product: Product): ParsedTire | null {
     return null;
   }
   const issues: string[] = [...(parsed.issues ?? [])];
+  if (/^MK\d/.test(parsed.pattern) && normalizeBrand(product.brand) !== '迈劲') {
+    issues.push(`MK 花纹属于迈劲，请核对商品目录品牌 ${product.brand}`);
+  }
   const codePattern = parsePatternFromCode(product.code)?.pattern ?? extractSupplierPattern(product.code)?.pattern;
   const codeSize = extractSize(product.code);
   const codePly = extractPly(product.code);
@@ -148,7 +149,7 @@ export const haidaAdapter: BrandAdapter = {
   label: BRAND,
   supplierName: '四川海大轮胎橡胶集团股份有限公司',
   version: ADAPTER_VERSION,
-  brandAliases: ['海大', 'HAIDA', '天府', 'TIANFU'],
+  brandAliases: ['海大', 'HAIDA', '天府', 'TIANFU', '迈劲', 'MILEKING'],
   // Owner confirmed these exact model associations on 2026-10-19.
   confirmedMappings: [
     {

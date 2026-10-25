@@ -907,7 +907,7 @@ export default function App() {
             </p>
             <ol className="upload-checklist">
               <li>只保留<strong>一行表头</strong>和<strong>本日需要入库的商品行</strong>。</li>
-              <li>删除其他日期、其他供应商的品牌行、合计行、备注行。海大和天府可放在同一文件中。</li>
+              <li>删除其他日期、其他供应商的品牌行、合计行、备注行。海大、天府和迈劲可放在同一文件中。</li>
               <li>保留下面这组字段；列名不完全一样也可以，下一步能手动映射。</li>
             </ol>
             <div className="header-chips" aria-label="标准表头">
@@ -991,7 +991,7 @@ export default function App() {
               {unsupportedBrands.length > 0 && (
                 <div className="alert error">
                   文件里检测到不属于当前供应商配置的品牌：{unsupportedBrands.join('、')}。
-                  {adapter.supplierName}目前支持海大、天府，请先删除其他品牌的行后重新上传。
+                  {adapter.supplierName}目前支持海大、天府、迈劲，请先删除其他品牌的行后重新上传。
                 </div>
               )}
 

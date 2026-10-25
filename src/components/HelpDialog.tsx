@@ -160,7 +160,7 @@ export function HelpDialog({ open, tutorials, onClose }: HelpDialogProps) {
               </details>
               <details>
                 <summary>为什么有些行显示“品牌未配置”？</summary>
-                <p>当前供应商为四川海大轮胎橡胶集团股份有限公司，支持海大、天府混合导入。其他品牌需要先删除对应行。</p>
+                <p>当前供应商为四川海大轮胎橡胶集团股份有限公司，支持海大、天府、迈劲混合导入。其他品牌需要先删除对应行。</p>
               </details>
               <details>
                 <summary>人工确认过的映射存在哪里？</summary>

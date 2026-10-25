@@ -20,7 +20,7 @@ export function compactText(value: unknown): string {
 
 export function normalizeBrand(value: unknown): string {
   const brand = compactText(value).replace(/[（）()]/g, '');
-  return brand === 'HAIDA' ? '海大' : brand === 'TIANFU' ? '天府' : brand;
+  return brand === 'HAIDA' ? '海大' : brand === 'TIANFU' ? '天府' : brand === 'MILEKING' ? '迈劲' : brand;
 }
 
 const SIZE_PATTERNS: RegExp[] = [
