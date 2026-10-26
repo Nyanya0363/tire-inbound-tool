@@ -31,6 +31,9 @@ const FLAG_LABELS: Record<string, string> = {
   RIGHT: '右',
 };
 
+// PRO is a separate product variant, not a cosmetic description.
+const CRITICAL_FLAGS = new Set(['WHITE', 'LEFT', 'RIGHT', 'PRO']);
+
 function flagLabel(flag: string): string {
   return FLAG_LABELS[flag] ?? flag;
 }
@@ -80,7 +83,7 @@ export function diffTire(manufacturer: ParsedTire, product: ParsedTire): TireDif
     const right = productFlags.has(flag) ? flagLabel(flag) : '无';
     if (left === right) return;
     addItem(items, `flag:${flag}`, `标识 ${flagLabel(flag)}`, left, right,
-      ['WHITE', 'LEFT', 'RIGHT'].includes(flag) ? 'critical' : 'descriptor');
+      CRITICAL_FLAGS.has(flag) ? 'critical' : 'descriptor');
     if (manufacturerFlags.has(flag) && !productFlags.has(flag)) {
       reasons.push(`商品资料缺少${flagLabel(flag)}`);
     } else if (!manufacturerFlags.has(flag) && productFlags.has(flag)) {

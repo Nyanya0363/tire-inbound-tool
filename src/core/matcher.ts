@@ -267,30 +267,37 @@ function matchParsedRow(
   }
 
   const coreProducts = index.core.get(coreKey) ?? [];
-  if (coreProducts.length === 1 && !diffTire(parsed, index.parsedProducts.get(coreProducts[0].code)!).hasCritical) {
+  if (coreProducts.length === 1) {
     const product = coreProducts[0];
-    const warning = `${diffTire(parsed, index.parsedProducts.get(product.code)!).summary}，请核对`;
-    const trace = makeTrace(rowNumber, rawModel, parsed, {
-      exactKey,
-      coreKey,
-      sizePatternKey,
-      exactCount: 0,
-      coreCount: 1,
-      result: 'review',
-      method: 'core',
-      warning,
-      reason: warning,
-    });
-    return {
-      status: 'review',
-      method: 'core',
-      product,
-      candidates: [],
-      warning,
-      reason: warning,
-      parsed,
-      trace,
-    };
+    const coreDiff = diffTire(parsed, index.parsedProducts.get(product.code)!);
+    // PRO is critical for batch confirmation, but a unique core match can still
+    // be shown for explicit per-row review. Other critical fields do not preselect.
+    const blocksCore = coreDiff.items.some(item => item.different
+      && item.severity === 'critical' && item.field !== 'flag:PRO');
+    if (!blocksCore) {
+      const warning = `${coreDiff.summary}，请核对`;
+      const trace = makeTrace(rowNumber, rawModel, parsed, {
+        exactKey,
+        coreKey,
+        sizePatternKey,
+        exactCount: 0,
+        coreCount: 1,
+        result: 'review',
+        method: 'core',
+        warning,
+        reason: warning,
+      });
+      return {
+        status: 'review',
+        method: 'core',
+        product,
+        candidates: [],
+        warning,
+        reason: warning,
+        parsed,
+        trace,
+      };
+    }
   }
 
   if (coreProducts.length > 1) {

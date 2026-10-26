@@ -25,7 +25,7 @@ describe('shared review explanations', () => {
     expect(reasons).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'unrecognized', side: 'product', message: expect.stringContaining('123') }),
       expect.objectContaining({ code: 'parameter_difference', field: 'flag:WHITE' }),
-      expect.objectContaining({ code: 'field_missing', field: 'flag:PRO' }),
+      expect.objectContaining({ code: 'parameter_difference', field: 'flag:PRO' }),
     ]));
     expect(reasons.some(item => item.code === 'field_missing' && item.field === 'loadSpeed' && item.side === 'product')).toBe(false);
     expect(result.explanations?.some(item => item.code === 'not_found')).toBe(false);

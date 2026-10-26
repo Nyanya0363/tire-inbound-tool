@@ -31,12 +31,22 @@ describe('tire diff', () => {
 
   it('flags a missing load speed as batch-confirmable', () => {
     const diff = diffTire(
-      parseInbound('HAIDA LT255/60R19 8PR白字 113/110Q HD877 Pro'),
+      parseInbound('HAIDA LT255/60R19 8PR白字 113/110Q HD877'),
       parseProduct('HD877-LT255/60R19', 'LT255/60R19 8PR 113 HD877白字'),
     );
     expect(diff.hasCritical).toBe(false);
     expect(diff.safeToBatchConfirm).toBe(true);
     expect(diff.summary).toContain('载重速度');
+  });
+
+  it('treats a PRO variant as a critical difference', () => {
+    const diff = diffTire(
+      parseInbound('HAIDA LT275/65R20 10PR白字 HD877 Pro'),
+      parseProduct('HD877-LT275/65R20', 'LT275/65R20 10PR白字 HD877'),
+    );
+    expect(diff.hasCritical).toBe(true);
+    expect(diff.safeToBatchConfirm).toBe(false);
+    expect(diff.summary).toContain('商品资料缺少Pro');
   });
 
   it('treats a different ply/load speed as critical', () => {
