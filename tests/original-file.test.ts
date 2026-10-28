@@ -6,7 +6,8 @@ import { analyzeInboundRows, buildInboundRows, readInboundWorkbook } from '../sr
 import { normalizeBrand } from '../src/core/text';
 import type { Catalog } from '../src/core/types';
 
-const catalog = JSON.parse(readFileSync('public/catalog.json', 'utf8')) as Catalog;
+// This test asserts historical counts against the matching historical catalog.
+const catalog = JSON.parse(readFileSync('tests/fixtures/haida-baseline.json', 'utf8')) as Catalog;
 const index = buildBrandIndex(catalog, haidaAdapter);
 
 const fixtureFile = ['文档/福州怡盛10.12出库原始文件.xlsx', '福州怡盛10.12出库原始文件.xlsx']

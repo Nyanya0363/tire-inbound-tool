@@ -11,7 +11,8 @@ import { diffTire } from '../src/core/diff';
 import { DiffDialog } from '../src/components/DiffDialog';
 import type { Catalog, Product } from '../src/core/types';
 
-const catalog = JSON.parse(readFileSync('public/catalog.json', 'utf8')) as Catalog;
+// Freeze the historical incomplete specs; maintaining the live catalog must not erase regression cases.
+const catalog = JSON.parse(readFileSync('tests/fixtures/haida-baseline.json', 'utf8')) as Catalog;
 const index = buildBrandIndex(catalog, adapter);
 const model = 'HAIDA LT275/60R20 10PR 123/120Q HD877 Pro';
 const product = (code: string, spec: string): Product => ({ code, spec, name: '轮胎', brand: '海大', unit: '条' });

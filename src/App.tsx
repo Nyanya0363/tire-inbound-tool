@@ -9,6 +9,7 @@ import { HelpDialog } from './components/HelpDialog';
 import { MappingManager } from './components/MappingManager';
 import { ProductPicker } from './components/ProductPicker';
 import { RecentHistory } from './components/RecentHistory';
+import { TriangleInbound } from './components/TriangleInbound';
 import { brandAdapters, getBrandAdapter } from './brands';
 import type { BrandAdapter } from './brands/types';
 import { loadCatalog } from './core/catalog';
@@ -140,6 +141,13 @@ function methodLabel(result: MatchResult): string {
 }
 
 export default function App() {
+  const [supplier, setSupplier] = useState<'haida' | 'triangle'>('haida');
+  return supplier === 'triangle'
+    ? <TriangleInbound onHaida={() => setSupplier('haida')} />
+    : <HaidaApp onTriangle={() => setSupplier('triangle')} />;
+}
+
+function HaidaApp({ onTriangle }: { onTriangle: () => void }) {
   const [brandId, setBrandId] = useState(brandAdapters[0]?.id ?? '');
   const adapter = useMemo(
     () => getBrandAdapter(brandId) ?? brandAdapters[0],
@@ -943,13 +951,14 @@ export default function App() {
             <select
               id="brand"
               value={brandId}
-              onChange={(event) => setBrandId(event.target.value)}
+              onChange={(event) => event.target.value === 'triangle' ? onTriangle() : setBrandId(event.target.value)}
             >
               {brandAdapters.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.supplierName}
                 </option>
               ))}
+              <option value="triangle">三角轮胎股份有限公司</option>
             </select>
           </div>
 
