@@ -5,7 +5,6 @@
 .triangle-app .triangle-source input { width: 20px; height: 20px; }
 .triangle-app td { white-space: normal; overflow-wrap: anywhere; }
 .triangle-app .triangle-error { color: var(--red); }
-.triangle-app .triangle-review { padding: 24px; max-width: 760px; max-height: 90vh; overflow: auto; }
 .triangle-app .dropzone input { max-width: 100%; }
 .triangle-app .card { min-width: 0; }
 .triangle-app .table-wrap { width: 100%; }

@@ -2,10 +2,10 @@ import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import * as XLSX from 'xlsx';
 import {
-  buildTriangleImport, matchTriangle, readTriangleWorkbook, triangleDescriptionDifferences,
-  triangleMemoryKey, triangleRows, triangleSelectableProducts, TRIANGLE_SUPPLIER,
+  buildTriangleImport, matchTriangle, readTriangleWorkbook,
+  triangleRows, TRIANGLE_SUPPLIER,
 } from '../src/brands/triangle/inbound';
-import type { TriangleDecision, TriangleMemories, TriangleRow } from '../src/brands/triangle/inbound';
+import type { TriangleDecision, TriangleRow } from '../src/brands/triangle/inbound';
 import { createImportWorkbook } from '../src/core/excel';
 import type { Catalog, Product } from '../src/core/types';
 
@@ -46,24 +46,22 @@ describe('isolated Triangle product-code workflow', () => {
       expect(matchTriangle({ ...row, model: code }, catalog).product).toBeUndefined();
     }
   });
-  it('blocks duplicate normalized catalog codes even when a remembered mapping exists', () => {
+  it('blocks duplicate normalized catalog codes', () => {
     const duplicate = catalogOf(product, { ...product, code: product.code.toLowerCase() });
-    const memories: TriangleMemories = { [triangleMemoryKey(row)]: { product, sourceCode: row.model, description: row.description } };
-    expect(matchTriangle(row, duplicate, memories)).toMatchObject({ status: 'blocked', canChoose: false });
-    expect(triangleSelectableProducts(duplicate)).toHaveLength(0);
+    expect(matchTriangle(row, duplicate).status).toBe('blocked');
   });
   it('rejects other brands and incomplete catalog data', () => {
     expect(matchTriangle(row, catalogOf({ ...product, brand: '海大' })).status).toBe('blocked');
     expect(matchTriangle(row, catalogOf({ ...product, unit: '' })).status).toBe('blocked');
-    expect(triangleSelectableProducts(catalogOf(product, { ...product, code: 'OTHER', brand: '海大' }))).toEqual([product]);
   });
   it.each([
     '205/70R15C(TR928)104/102S 三角', '195/70R15C(TR929)104/102S 三角',
     '195/70R15C(TR928 PRO)104/102S 三角', '195/70R15C(TR928 PLUS)104/102S 三角',
-    '195/70R15C(TR928)104/102Q 三角',
-  ])('requires review for a known code with description difference: %s', description => {
-    expect(matchTriangle({ ...row, description }, catalog)).toMatchObject({ status: 'review', candidate: product });
-    expect(triangleDescriptionDifferences(description, product.spec).length).toBeGreaterThan(0);
+    '195/70R15C(TR928)104/102Q 三角', '', '完全不同的描述',
+  ])('matches solely by SKU regardless of description: %s', description => {
+    const result = matchTriangle({ ...row, description }, catalog);
+    expect(result).toMatchObject({ status: 'matched', product });
+    expect(buildTriangleImport([result], {}, catalog)[0]).toMatchObject({ code: product.code, spec: product.spec, price: 218 });
   });
   it('blocks rows with blank codes or invalid numeric cells without silently dropping them', async () => {
     const book = await readTriangleWorkbook(fileOf([
@@ -74,8 +72,8 @@ describe('isolated Triangle product-code workflow', () => {
     expect(rows).toHaveLength(5);
     for (const r of rows) {
       const result = matchTriangle(r, catalog);
-      expect(result.status).toBe('blocked'); expect(result.canChoose).toBe(false);
-      expect(() => buildTriangleImport([result], { [r.rowNumber]: { kind: 'product', product } }, catalog)).toThrow();
+      expect(result.status).toBe('blocked');
+      expect(() => buildTriangleImport([result], {}, catalog)).toThrow();
     }
   });
   it('rejects duplicate headers and overlapping field mappings', async () => {
@@ -83,19 +81,21 @@ describe('isolated Triangle product-code workflow', () => {
     const book = await readTriangleWorkbook(fileOf([['产品', '数量', '价格'], [product.code, 1, 2]]));
     expect(() => triangleRows(book, { ...book.mapping, qty: '价格' })).toThrow('同一列');
   });
-  it('requires explicit handling for every selected row and retains separate skip/new dispositions', () => {
-    const results = [matchTriangle(row, catalog), matchTriangle({ ...row, rowNumber: 3, model: 'MISSING' }, catalog)];
-    expect(() => buildTriangleImport(results, {}, catalog)).toThrow('尚未处理');
-    for (const kind of ['skip', 'new'] as const) expect(buildTriangleImport(results, { 3: { kind } }, catalog)).toHaveLength(1);
+  it('automatically excludes new SKUs without any manual decision', () => {
+    const missing = matchTriangle({ ...row, rowNumber: 3, model: 'MISSING' }, catalog);
+    expect(missing.status).toBe('new');
+    expect(buildTriangleImport([matchTriangle(row, catalog), missing], {}, catalog)).toHaveLength(1);
+    expect(buildTriangleImport([missing], {}, catalog)).toEqual([]);
+    expect(buildTriangleImport([matchTriangle(row, catalog)], { 2: { kind: 'skip' } }, catalog)).toEqual([]);
   });
-  it('reuses only same-description, current Triangle memories and invalidates changed targets', () => {
+  it('requires rematching when catalog changes or a new SKU is added', () => {
+    const matched = matchTriangle(row, catalog);
+    expect(() => buildTriangleImport([matched], {}, catalogOf({ ...product, spec: 'changed' }))).toThrow('目录发生变化');
     const unknown = { ...row, model: 'FACTORY-NEW-CODE' };
-    const memories: TriangleMemories = { [triangleMemoryKey(unknown)]: { sourceCode: unknown.model, description: unknown.description, product } };
-    expect(matchTriangle(unknown, catalog, memories).status).toBe('matched');
-    expect(matchTriangle({ ...unknown, description: row.description + ' PRO' }, catalog, memories).status).toBe('review');
-    expect(matchTriangle(unknown, catalogOf({ ...product, spec: product.spec + ' PLUS' }), memories).status).toBe('review');
-    const reviewed = matchTriangle(unknown, catalog, memories);
-    expect(() => buildTriangleImport([reviewed], {}, catalogOf({ ...product, spec: 'changed' }))).toThrow('目录发生变化');
+    const missing = matchTriangle(unknown, catalog);
+    const updated = catalogOf(product, { ...product, code: unknown.model });
+    expect(() => buildTriangleImport([missing], {}, updated)).toThrow('目录发生变化');
+    expect(buildTriangleImport([matchTriangle(unknown, updated)], {}, updated)[0].code).toBe(unknown.model);
   });
 });
 
@@ -112,17 +112,17 @@ describe.skipIf(!existsSync(fixture))('local Triangle source workbook (never com
     expect(rows.reduce((sum, r) => sum + r.qty * r.price, 0)).toBe(634941);
     const results = rows.map(r => matchTriangle(r, realCatalog));
     const missing = rows.filter(row => !row.validationErrors?.length && !realCatalog.products.some(p => p.code.trim().toUpperCase() === row.model.trim().toUpperCase()));
-    expect(results.filter(r => r.reason.startsWith('未找到该产品编号')).map(r => r.row.model)).toEqual(missing.map(r => r.model));
+    expect(results.filter(r => r.status === 'new').map(r => r.row.model)).toEqual(missing.map(r => r.model));
     // The supplied order contains a zero-price line; it must be blocked, not silently imported.
     expect(results.filter(r => r.status === 'blocked').map(r => [r.row.model, r.row.price]))
       .toEqual([['CBCTR92817F14CM0', 0]]);
     const decisions: Record<number, TriangleDecision> = {};
-    for (const result of results) if (result.status !== 'matched') decisions[result.row.rowNumber] = { kind: 'skip' };
+    for (const result of results) if (result.status === 'blocked') decisions[result.row.rowNumber] = { kind: 'skip' };
     const output = buildTriangleImport(results, decisions, realCatalog);
     expect(output.length).toBeGreaterThan(0);
     expect(output.every(r => r.supplier === TRIANGLE_SUPPLIER)).toBe(true);
     console.log(JSON.stringify({ sourceRows: rows.length, importable: output.length,
-      review: results.filter(r => r.status === 'review').length, blocked: results.filter(r => r.status === 'blocked').length,
+      newProducts: results.filter(r => r.status === 'new').length, blocked: results.filter(r => r.status === 'blocked').length,
       exportQuantity: output.reduce((n, r) => n + r.qty, 0), exportAmount: output.reduce((n, r) => n + r.qty * r.price, 0) }));
   });
 });
