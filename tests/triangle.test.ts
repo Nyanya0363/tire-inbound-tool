@@ -6,7 +6,7 @@ import {
   triangleRows, TRIANGLE_SUPPLIER,
 } from '../src/brands/triangle/inbound';
 import type { TriangleDecision, TriangleRow } from '../src/brands/triangle/inbound';
-import { createImportWorkbook } from '../src/core/excel';
+import { createImportWorkbook, validateInboundRow } from '../src/core/excel';
 import type { Catalog, Product } from '../src/core/types';
 
 const product: Product = { code: 'CBCTR92819F15DH0', name: '轮胎(三角)', spec: '195/70R15C(TR928)104/102S 三角', brand: '三角', unit: '条' };
@@ -76,6 +76,18 @@ describe('isolated Triangle product-code workflow', () => {
       expect(() => buildTriangleImport([result], {}, catalog)).toThrow();
     }
   });
+  it('imports zero-priced Triangle accessories while Haida still rejects zero prices', async () => {
+    const book = await readTriangleWorkbook(fileOf([['产品', '数量', '价格'], [product.code, 10, 0]]));
+    const [accessory] = triangleRows(book, book.mapping);
+    expect(accessory.validationErrors).toEqual([]);
+    const result = matchTriangle(accessory, catalog);
+    expect(result.status).toBe('matched');
+    const output = buildTriangleImport([result], {}, catalog);
+    expect(output[0]).toMatchObject({ qty: 10, price: 0 });
+    const sheet = createImportWorkbook(output).Sheets.Sheet1;
+    expect(XLSX.utils.sheet_to_json(sheet, { header: 1 })[1]).toEqual([TRIANGLE_SUPPLIER, product.code, product.name, product.spec, '条', 10, 0]);
+    expect(validateInboundRow(accessory)).toContain('单价必须大于 0，请核实原表或单价列');
+  });
   it('rejects duplicate headers and overlapping field mappings', async () => {
     await expect(readTriangleWorkbook(fileOf([['产品', '数量', '价格', '价格'], [product.code, 1, 2, 3]]))).rejects.toThrow('重复');
     const book = await readTriangleWorkbook(fileOf([['产品', '数量', '价格'], [product.code, 1, 2]]));
@@ -113,9 +125,8 @@ describe.skipIf(!existsSync(fixture))('local Triangle source workbook (never com
     const results = rows.map(r => matchTriangle(r, realCatalog));
     const missing = rows.filter(row => !row.validationErrors?.length && !realCatalog.products.some(p => p.code.trim().toUpperCase() === row.model.trim().toUpperCase()));
     expect(results.filter(r => r.status === 'new').map(r => r.row.model)).toEqual(missing.map(r => r.model));
-    // The supplied order contains a zero-price line; it must be blocked, not silently imported.
-    expect(results.filter(r => r.status === 'blocked').map(r => [r.row.model, r.row.price]))
-      .toEqual([['CBCTR92817F14CM0', 0]]);
+    expect(results.filter(r => r.status === 'blocked')).toEqual([]);
+    expect(results.find(r => r.row.price === 0)?.status).toBe('new');
     const decisions: Record<number, TriangleDecision> = {};
     for (const result of results) if (result.status === 'blocked') decisions[result.row.rowNumber] = { kind: 'skip' };
     const output = buildTriangleImport(results, decisions, realCatalog);

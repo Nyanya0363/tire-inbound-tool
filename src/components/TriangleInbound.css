@@ -1,10 +1,6 @@
-.triangle-app .triangle-mapping { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
-.triangle-app .triangle-mapping label { display: grid; gap: 6px; }
-.triangle-app select { max-width: 100%; padding: 8px; }
 .triangle-app .triangle-source { max-height: 420px; overflow: auto; }
 .triangle-app .triangle-source input { width: 20px; height: 20px; }
 .triangle-app td { white-space: normal; overflow-wrap: anywhere; }
 .triangle-app .triangle-error { color: var(--red); }
-.triangle-app .dropzone input { max-width: 100%; }
 .triangle-app .card { min-width: 0; }
 .triangle-app .table-wrap { width: 100%; }

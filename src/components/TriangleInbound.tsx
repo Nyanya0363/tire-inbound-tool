@@ -121,25 +121,26 @@ export function TriangleInbound({ onHaida }: { onHaida: () => void }) {
           <select id="triangle-supplier" value="triangle" onChange={event => { if (event.target.value === 'haida') onHaida(); }}>
             <option value="haida">四川海大轮胎橡胶集团股份有限公司</option><option value="triangle">{TRIANGLE_SUPPLIER}</option>
           </select></div>
-        <h2>01 上传三角已发货订单</h2>
-        <p>只按完整 SKU（产品编号）匹配：命中即可导入，未命中自动列为待新建。产品描述仅展示，不参与匹配。数量和价格直接用于入库。</p>
+        <div className="section-heading"><span className="step">01</span><div><h2>上传三角已发货订单</h2></div></div>
+        <div className="upload-guide"><p>只按完整 SKU（产品编号）匹配：命中即可导入，未命中自动列为待新建。产品描述仅展示，不参与匹配。数量和价格直接用于入库，配套商品单价为 0 也可正常导入。</p>
         <p className="muted">只读取第一个工作表。发货日期不代表实际入库日期；数量为本次整行入库数量，部分到货请先调整原表。切换供应商会清空当前处理结果。</p>
         <div className="header-chips">{TRIANGLE_HEADERS.map(header => <span key={header}>{header}</span>)}</div>
-        <div className="toolbar"><button className="secondary" onClick={() => downloadWorkbook(triangleTable(TRIANGLE_HEADERS, [], 'Sheet1'), '三角_空白表头.xlsx')}>下载空白表头</button>
-          <button className="secondary" onClick={() => downloadWorkbook(triangleTable(TRIANGLE_HEADERS,
-            [['CBCTR92819F15DH0', '195/70R15C(TR928)104/102S 三角', 2, 218, '2026-10-18', '', '']], 'Sheet1'), '三角_示例_勿直接导入.xlsx')}>下载示例文件</button></div>
-        <label className="dropzone" onDragOver={event => event.preventDefault()} onDrop={event => {
+        <div className="upload-guide-actions"><button className="link-button" onClick={() => downloadWorkbook(triangleTable(TRIANGLE_HEADERS, [], 'Sheet1'), '三角_空白表头.xlsx')}>下载空白表头</button>
+          <button className="link-button" onClick={() => downloadWorkbook(triangleTable(TRIANGLE_HEADERS,
+            [['CBCTR92819F15DH0', '195/70R15C(TR928)104/102S 三角', 2, 218, '2026-10-18', '', '']], 'Sheet1'), '三角_示例_勿直接导入.xlsx')}>下载示例文件</button></div></div>
+        <label className={`dropzone ${busy ? 'disabled' : ''}`} role="button" tabIndex={0}
+          onKeyDown={event => { if (!busy && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); fileInput.current?.click(); } }} onDragOver={event => event.preventDefault()} onDrop={event => {
           event.preventDefault(); if (!busy && event.dataTransfer.files[0]) void upload(event.dataTransfer.files[0]);
         }}><strong>{busy ? '正在读取…' : '选择三角 Excel，或拖入文件'}</strong>
-          <input ref={fileInput} aria-label="上传三角订单" type="file" accept=".xlsx,.xls,.csv" disabled={busy}
+          <span>支持 .xlsx / .xls / .csv；程序只读取第一个工作表</span><input hidden ref={fileInput} aria-label="上传三角订单" type="file" accept=".xlsx,.xls,.csv" disabled={busy}
             onChange={event => { const file = event.target.files?.[0]; if (file) void upload(file); event.target.value = ''; }} /></label>
         {error && <p className="alert error" role="alert">{error}</p>}
         {!catalog && <p className="muted">商品目录尚未加载，加载完成后才能匹配。</p>}
       </section>
       {book && mapping && <section className="card">
-        <h2>02 核对字段与本次入库范围</h2>
+        <div className="section-heading"><span className="step">02</span><div><h2>核对字段与本次入库范围</h2></div></div>
         <p>{book.fileName} · 工作表 {book.sheetName} · {book.rows.length} 行{book.sheetCount > 1 ? `（共 ${book.sheetCount} 个工作表，仅读取第一个）` : ''}</p>
-        <div className="triangle-mapping">{(Object.keys(mapping) as Array<keyof TriangleMapping>).map(key => <label key={key}>
+        <div className="mapping-grid">{(Object.keys(mapping) as Array<keyof TriangleMapping>).map(key => <label className="field" key={key}>
           {{ code: '产品编号列', description: '产品描述列', qty: '数量列', price: '单价列', date: '发货日期列' }[key]}
           <select aria-label={{ code: '产品编号列', description: '产品描述列', qty: '数量列', price: '单价列', date: '发货日期列' }[key]}
             value={mapping[key]} onChange={event => { setMapping({ ...mapping, [key]: event.target.value }); setSelected(new Set()); setDate(''); invalidate(); }}>
@@ -164,8 +165,8 @@ export function TriangleInbound({ onHaida }: { onHaida: () => void }) {
         <div className="toolbar"><button className="primary" disabled={!catalog || !selectedRows.length || !!analysis.error || busy} onClick={runMatch}>开始匹配（{selectedRows.length} 行）</button></div>
       </section>}
       {results.length > 0 && <section className="card">
-        <h2>03 核对结果并导出</h2>
-        <p>可导入 {ready.length} 行 · 数据异常 {pending.length} 行 · 待新建 {newRows.length} 行 · 本次跳过 {skipped.length} 行</p>
+        <div className="section-heading"><span className="step">03</span><div><h2>核对结果并导出</h2></div></div>
+        <div className="summary-grid">{[["可导入", ready.length], ["数据异常", pending.length], ["待新建", newRows.length], ["本次跳过", skipped.length]].map(([label, count]) => <div className="stat" key={label}><span>{label}</span><strong>{count}</strong></div>)}</div>
         <p>导出数量 {totalQty} · 导出金额 ¥{money(totalAmount)} · 与所选源行差额 ¥{money(validSourceAmount - totalAmount)}</p>
         <p className="muted">同编号的多行订单分别保留。SKU 未命中的新品自动排除在入库模板之外，可下载待新建清单；数据异常行须修正或明确跳过。</p>
         <div className="toolbar">{(['xlsx', 'xls'] as const).map(value => <button key={value} className="primary" disabled={pending.length > 0 || !ready.length} onClick={() => setFormat(value)}>下载导入模板 .{value}</button>)}

@@ -78,7 +78,7 @@ export function triangleRows(book: TriangleWorkbook, mapping: TriangleMapping): 
     const row: TriangleRow = { rowNumber, model, description: String(cells[mapping.description] ?? '').trim(),
       date: dateText(cells[mapping.date]), qty: numeric(cells[mapping.qty]), price: numeric(cells[mapping.price]),
       unit: '', brand: '三角', source: cells };
-    row.validationErrors = [...(!model ? ['产品编号为空'] : []), ...validateInboundRow(row)];
+    row.validationErrors = [...(!model ? ['产品编号为空'] : []), ...validateInboundRow(row, true)];
     return row;
   });
 }
@@ -89,7 +89,7 @@ const completeProduct = (product: Product) => [product.code, product.name, produ
 
 export function matchTriangle(row: TriangleRow, catalog: Catalog): TriangleResult {
   const base = { row };
-  const errors = [...(!normalizeCode(row.model) ? ['产品编号为空'] : []), ...validateInboundRow(row)];
+  const errors = [...(!normalizeCode(row.model) ? ['产品编号为空'] : []), ...validateInboundRow(row, true)];
   if (errors.length) return { ...base, status: 'blocked', reason: errors.join('；') };
   const exact = catalog.products.filter(p => normalizeCode(p.code) === normalizeCode(row.model));
   if (exact.length > 1) return { ...base, status: 'blocked', reason: '目录中该编号重复，请先维护商品目录，不能默认选择其中一条。' };
@@ -112,7 +112,7 @@ export function buildTriangleImport(results: TriangleResult[], decisions: Record
     if (!current.product || !sameProduct(result.product, current.product)) throw new Error('商品目录发生变化，请重新匹配');
     rows.push(result.row); products.set(result.row.rowNumber, current.product);
   }
-  return buildImportRows(rows, products, TRIANGLE_SUPPLIER);
+  return buildImportRows(rows, products, TRIANGLE_SUPPLIER, new Set(), true);
 }
 
 export function triangleTable(headers: string[], rows: unknown[][], sheetName: string): XLSX.WorkBook {

@@ -160,7 +160,7 @@ function parseNumber(value: unknown): number {
   return Number.isFinite(number) ? number : NaN;
 }
 
-export function validateInboundRow(row: Pick<RawInboundRow, 'qty' | 'price' | 'validationErrors'>): string[] {
+export function validateInboundRow(row: Pick<RawInboundRow, 'qty' | 'price' | 'validationErrors'>, allowZeroPrice = false): string[] {
   const errors = [...(row.validationErrors ?? [])];
   if (!Number.isFinite(row.qty)) {
     if (!errors.some(error => error.startsWith('数量'))) errors.push('数量为空或不是有效数字');
@@ -169,7 +169,7 @@ export function validateInboundRow(row: Pick<RawInboundRow, 'qty' | 'price' | 'v
   if (!Number.isFinite(row.price)) {
     if (!errors.some(error => error.startsWith('单价'))) errors.push('单价为空或不是有效数字');
   }
-  else if (row.price <= 0) errors.push('单价必须大于 0，请核实原表或单价列');
+  else if (row.price < 0 || (!allowZeroPrice && row.price === 0)) errors.push(allowZeroPrice ? '单价不能小于 0，请核实原表或单价列' : '单价必须大于 0，请核实原表或单价列');
   else if (Number.isFinite(row.qty) && !Number.isFinite(row.qty * row.price)) errors.push('数量与单价乘积超出有效范围');
   return [...new Set(errors)];
 }
@@ -245,12 +245,13 @@ export function buildImportRows(
   resolved: Map<number, { code: string; name: string; spec: string; unit: string }>,
   supplierName: string,
   excludedRows: ReadonlySet<number> = new Set(),
+  allowZeroPrice = false,
 ): ExportRow[] {
   return rows
     .map((row) => {
       const product = resolved.get(row.rowNumber);
       if (!product || excludedRows.has(row.rowNumber)) return null;
-      const errors = validateInboundRow(row);
+      const errors = validateInboundRow(row, allowZeroPrice);
       if (errors.length) throw new Error(`第 ${row.rowNumber} 行不能导出：${errors.join('；')}`);
       if (![product.code, product.name, product.spec, product.unit, supplierName].every(value => value.trim())) {
         throw new Error(`第 ${row.rowNumber} 行商品资料或供应商不完整，不能导出`);
