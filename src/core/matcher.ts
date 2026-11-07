@@ -169,7 +169,9 @@ function matchParsedRow(
     && aliasIsCurrent(entry, index.byCode.get(entry.code))
     && (!brand || normalizeBrand(entry.brand) === normalizeBrand(brand))
     && (!parsed || (normalizeBrand(entry.brand) === normalizeBrand(parsed.brand)
-      && samePatternFamily(parsed.pattern, index.parsedProducts.get(entry.code)?.pattern ?? ''))));
+      && (samePatternFamily(parsed.pattern, index.parsedProducts.get(entry.code)?.pattern ?? '')
+        || adapter.confirmedMappings?.some(mapping => normalizeText(mapping.model) === modelKey
+          && mapping.code === entry.code && mapping.spec === index.byCode.get(entry.code)?.spec)))));
   const currentCodes = new Set(current.map(aliasCode));
   if (currentCodes.size === 1 && current.length === entries.length) {
     const product = index.byCode.get([...currentCodes][0]);

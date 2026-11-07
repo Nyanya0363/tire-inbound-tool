@@ -14,7 +14,7 @@ import {
 } from '../../core/text';
 
 const BRAND = '海大';
-const ADAPTER_VERSION = 'haida-5';
+const ADAPTER_VERSION = 'haida-6';
 
 function canonicalBrand(value: string): string {
   const brand = normalizeBrand(value);
@@ -103,7 +103,8 @@ function parseInbound(raw: string, brand?: string): ParsedTire {
     .replace(/[()（）\[\]，,;；:：-]/g, '');
 
   return {
-    brand: brand ? canonicalBrand(brand) : embeddedBrand
+    brand: embeddedBrand === '天府' && canonicalBrand(brand ?? '') === BRAND && patternMatch.pattern === 'RD-104' && size === '155R13LT'
+      ? '天府' : brand ? canonicalBrand(brand) : embeddedBrand
       ?? (/^MK/.test(patternMatch.pattern) ? '迈劲' : /^(?:TF|RD-)/.test(patternMatch.pattern) ? '天府' : BRAND),
     pattern: patternMatch.pattern,
     size,
@@ -152,6 +153,12 @@ export const haidaAdapter: BrandAdapter = {
   brandAliases: ['海大', 'HAIDA', '天府', 'TIANFU', '迈劲', 'MILEKING'],
   // Owner confirmed these exact model associations on 2026-10-19.
   confirmedMappings: [
+    {
+      model: 'HAIDA 225/55R12C 6PR 93N HD506',
+      code: 'HD506-225/55R12C',
+      spec: '225/55R12C HD506EVT 93N',
+      brand: '海大', unit: '条',
+    },
     {
       model: 'HAIDA 185R14C 8PR 102/100R EV HD501',
       code: 'HD501-185R14C',
