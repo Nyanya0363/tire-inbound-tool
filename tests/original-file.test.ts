@@ -49,9 +49,15 @@ describeOriginal('original Fuzhou Yisheng workbook', () => {
 
     expect(results).toHaveLength(67);
     expect(results.filter((result) => result.status === 'matched')).toHaveLength(40);
-    expect(results.filter((result) => result.status === 'review')).toHaveLength(21);
+    expect(results.filter((result) => result.status === 'review')).toHaveLength(23);
     expect(results.filter(result => result.method === 'core')).toHaveLength(16);
-    expect(results.filter((result) => result.status === 'unmatched')).toHaveLength(6);
+    expect(results.filter((result) => result.status === 'unmatched')).toHaveLength(4);
+    for (const rowNumber of [31, 32]) {
+      const result = results.find(r => r.trace.rowNumber === rowNumber)!;
+      expect(result.status).toBe('review');
+      expect(result.candidates.some(c => c.origin === 'brand_conflict')).toBe(true);
+      expect(result.product).toBeUndefined();
+    }
     for (const rowNumber of [65, 72, 73]) {
       const result = results.find(item => item.trace.rowNumber === rowNumber);
       expect(result?.status).toBe('unmatched');

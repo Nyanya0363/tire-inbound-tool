@@ -1,3 +1,4 @@
+import { candidateOrigin, rememberReviewedAlias } from './core/review-candidates';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
 import { CatalogAdmin } from './components/CatalogAdmin';
@@ -649,7 +650,8 @@ function HaidaApp({ onTriangle }: { onTriangle: () => void }) {
     const row = rows.find(item => item.rowNumber === rowNumber);
     if (!row || validateInboundRow(row).length) { setError('请先修正此行数量或单价，再重新上传匹配。'); return; }
     const productParsed = index?.parsedProducts.get(product.code);
-    if (result?.parsed && productParsed && !samePatternFamily(result.parsed.pattern, productParsed.pattern)) {
+    if (result?.parsed && productParsed && !samePatternFamily(result.parsed.pattern, productParsed.pattern)
+      && !candidateOrigin(result.parsed, productParsed, row.model, mapping.brand ? String(row.source[mapping.brand] ?? '').trim() : '', adapter)) {
       setError(`基础花纹不同，不能对应此商品：厂家 ${result.parsed.pattern}，商品 ${productParsed.pattern}。请检查正确商品是否已建档。`);
       return;
     }
@@ -664,7 +666,7 @@ function HaidaApp({ onTriangle }: { onTriangle: () => void }) {
       && !window.confirm(`请核对本次人工选择：\n厂家型号：${result?.trace.rawModel ?? ''}\n商品规格：${product.spec}\n${[comparison?.summary, ...issues].filter(Boolean).join('；')}\n确认对应此商品并保存记忆吗？`)) return;
     const aliasKey = result ? makeAliasKey(result.trace.rawModel) : '';
     if (aliasKey) {
-      const next = { ...aliases, [aliasKey]: rememberAlias(result!.trace.rawModel, product, adapter, result?.parsed?.brand) };
+      const next = { ...aliases, [aliasKey]: rememberReviewedAlias(result!.trace.rawModel, product, adapter, mapping.brand ? String(row.source[mapping.brand] ?? '').trim() : '', index!) };
       setAliases(next);
       if (adapter) saveAliases(adapter, next);
     }
@@ -863,7 +865,7 @@ function HaidaApp({ onTriangle }: { onTriangle: () => void }) {
 
   function downloadNewProducts() {
     if (!newProductRows.length) return;
-    downloadWorkbook(createNewProductWorkbook(newProductRows, supplierName, mapping.price), `待新建商品清单_${todayText()}.xlsx`);
+    downloadWorkbook(createNewProductWorkbook(newProductRows, supplierName, mapping.price, { results, catalogVersion: catalog?.version ?? '', appVersion: __APP_VERSION__ + ' / ' + __COMMIT_SHA__ }), `待新建商品清单_${todayText()}.xlsx`);
     setBackupRevision(value => value + 1);
   }
 
@@ -1426,18 +1428,19 @@ function HaidaApp({ onTriangle }: { onTriangle: () => void }) {
                               : '请先查看差异；核实后选择商品，确认未建档后可标记待新建。'}</p>}
                             {result.status !== 'matched' && result.candidates.length > 0 && (
                               <div className="candidate-row">
-                                {result.candidates.slice(0, 3).map((candidate) => (
+                                {result.candidates.slice(0, 8).map((candidate) => (
                                   <div key={candidate.product.code} className="candidate-chip">
                                     <span className="candidate-spec-main">{candidate.product.spec}</span>
                                     <small className="candidate-code-sub">SKU：{candidate.product.code}</small>
                                     {result.status === 'unmatched' && <small>同花纹其他规格，仅供参考</small>}
                                     <MatchReasons items={candidate.explanations} compact />
+                                    {candidate.origin && <small className="candidate-difference">{candidate.reason}</small>}
                                     {!candidate.explanations?.length && <small className="candidate-difference">{candidate.reason}</small>}
                                     <div className="candidate-actions">
                                       <button type="button" className="row-action" onClick={() => {
                                         setDiffCandidate(candidate.product.code); setDiffRow(result.trace.rowNumber);
                                       }}>查看差异</button>
-                                      <button type="button" className="row-action row-action-primary" onClick={() => selectProduct(result.trace.rowNumber, candidate.product)}>选择此商品</button>
+                                      <button type="button" className="row-action row-action-primary" onClick={() => selectProduct(result.trace.rowNumber, candidate.product)}>{candidate.origin ? '确认同款并保存对应关系' : '选择此商品'}</button>
                                     </div>
                                   </div>
                                 ))}
@@ -1452,6 +1455,7 @@ function HaidaApp({ onTriangle }: { onTriangle: () => void }) {
                               }}>{skipped[result.trace.rowNumber] ? '取消跳过' : '本次跳过'}</button>
                               {(newProducts[result.trace.rowNumber] || (result.status !== 'matched' && !row?.validationErrors?.length)) && (
                                 <button type="button" className="row-action" onClick={() => {
+                                  if (!newProducts[result.trace.rowNumber] && (result.candidates.length || result.product) && !window.confirm('目录已有候选商品，请先核实候选及差异。仍确认标记为待新建吗？')) return;
                                   setSkipped(prev => ({ ...prev, [result.trace.rowNumber]: false }));
                                   setNewProducts(prev => ({ ...prev, [result.trace.rowNumber]: !prev[result.trace.rowNumber] }));
                                   setFilter('all');

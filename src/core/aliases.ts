@@ -8,6 +8,7 @@ export interface ConfirmedAlias {
   brand: string;
   unit: string;
   sourceKey?: string;
+  confirmation?: { sourceBrand: string; embeddedBrand: string; sourceKey: string; differences: string; rawModel: string };
 }
 export type AliasMap = Record<string, string | ConfirmedAlias>;
 
@@ -40,6 +41,7 @@ export function readAliases(source: unknown): AliasMap {
       if (entry.code.trim() && entry.spec.trim()) result[normalizeText(key)] = {
         code: entry.code, spec: entry.spec, brand: entry.brand, unit: entry.unit,
         ...(typeof entry.sourceKey === 'string' ? { sourceKey: entry.sourceKey } : {}),
+        ...(entry.confirmation && ['sourceBrand', 'embeddedBrand', 'sourceKey', 'differences', 'rawModel'].every(key => typeof (entry.confirmation as unknown as Record<string, unknown>)[key] === 'string') ? { confirmation: entry.confirmation } : {}),
       };
     }
   }

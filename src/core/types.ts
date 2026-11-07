@@ -27,6 +27,7 @@ export interface ParsedTire {
 }
 
 export interface Candidate {
+  origin?: 'brand_conflict' | 'pattern_suffix';
   product: Product;
   score: number;
   reason: string;
@@ -63,12 +64,16 @@ export interface MatchTrace {
   reason?: string;
   explanations?: MatchExplanation[];
   candidates: Array<{
+    origin?: Candidate['origin'];
     code: string;
     spec: string;
     score: number;
     reason: string;
     explanations?: MatchExplanation[];
   }>;
+  memoryState?: string;
+  originalResult?: MatchStatus;
+  originalReason?: string;
   error?: string;
 }
 

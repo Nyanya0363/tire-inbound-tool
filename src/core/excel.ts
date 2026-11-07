@@ -1,3 +1,4 @@
+import type { MatchResult } from './types';
 import * as XLSX from 'xlsx';
 import { formatExplanations } from './explanations';
 import type { BrandAdapter } from '../brands/types';
@@ -348,14 +349,19 @@ export function createImportWorkbook(rows: ExportRow[]): XLSX.WorkBook {
   return workbook;
 }
 
-export function createNewProductWorkbook(rows: RawInboundRow[], supplierName: string, priceField: string): XLSX.WorkBook {
+export function createNewProductWorkbook(rows: RawInboundRow[], supplierName: string, priceField: string, diagnostics?: { results: MatchResult[]; catalogVersion: string; appVersion: string }): XLSX.WorkBook {
   const data = [
-    ['源文件行号', '供应商', '品牌', '厂家型号', '单位', '数量', '单价', '单价口径', '状态', '处理说明'],
+    ['源文件行号', '供应商', '品牌', '厂家型号', '单位', '数量', '单价', '单价口径', '状态', '处理说明', '原始匹配状态', '原始原因', '疑似SKU', '差异', '目录版本', '程序版本'],
     ...rows.map(row => [row.rowNumber, supplierName, row.brand, row.model, row.unit, row.qty, row.price,
-      priceField, '待新建商品', '人工核对后回业务系统新建商品，更新商品目录后重新匹配；本行未写入入库导入模板。']),
+      priceField, '待新建商品', '人工核对后回业务系统新建商品，更新商品目录后重新匹配；本行未写入入库导入模板。',
+      diagnostics?.results.find(r => r.trace.rowNumber === row.rowNumber)?.status ?? '',
+      diagnostics?.results.find(r => r.trace.rowNumber === row.rowNumber)?.reason ?? '',
+      diagnostics?.results.find(r => r.trace.rowNumber === row.rowNumber)?.candidates.map(c => c.product.code).join('；') ?? '',
+      diagnostics?.results.find(r => r.trace.rowNumber === row.rowNumber)?.candidates.map(c => c.product.code + '：' + c.reason).join('；') ?? '',
+      diagnostics?.catalogVersion ?? '', diagnostics?.appVersion ?? '']),
   ];
   const sheet = XLSX.utils.aoa_to_sheet(data);
-  sheet['!cols'] = [10, 38, 10, 52, 8, 10, 14, 12, 16, 80].map(wch => ({ wch }));
+  sheet['!cols'] = [10, 38, 10, 52, 8, 10, 14, 12, 16, 80, 16, 60, 30, 80, 22, 22].map(wch => ({ wch }));
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, sheet, '待新建商品清单');
   return workbook;
@@ -390,7 +396,7 @@ export function createReportWorkbook(traces: MatchTrace[], catalogVersion: strin
     '匹配方式',
     '说明',
     '候选商品',
-    '商品目录版本',
+    '商品目录版本', '原始匹配状态', '原始原因', '记忆状态',
   ];
   const data = [
     headers,
@@ -411,7 +417,7 @@ export function createReportWorkbook(traces: MatchTrace[], catalogVersion: strin
       trace.candidates
         .map((candidate) => `${candidate.code}(${candidate.score}) ${formatExplanations(candidate.explanations) || candidate.reason}`)
         .join(' | '),
-      catalogVersion,
+      catalogVersion, trace.originalResult ?? trace.result, trace.originalReason ?? trace.reason ?? '', trace.memoryState ?? '',
     ]),
   ];
   const sheet = XLSX.utils.aoa_to_sheet(data);

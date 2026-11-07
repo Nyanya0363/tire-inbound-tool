@@ -90,6 +90,6 @@ export function explainMatch(result: MatchResult, products: Map<string, ParsedTi
   return { ...result, candidates, explanations,
     trace: { ...result.trace, explanations, candidates: candidates.map(candidate => ({
       code: candidate.product.code, spec: candidate.product.spec, score: candidate.score,
-      reason: candidate.reason, explanations: candidate.explanations,
+      origin: candidate.origin, reason: candidate.reason, explanations: candidate.explanations,
     })) } };
 }

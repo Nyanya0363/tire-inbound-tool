@@ -75,6 +75,7 @@ describe('real catalog model variations', () => {
     const result = matchRow(1, model, haidaAdapter, index, { [model]: rememberAlias(model, wrong, haidaAdapter) });
     expect(result.status).not.toBe('matched');
     expect(result.product).toBeUndefined();
-    expect(result.candidates).toHaveLength(0);
+    expect(result.candidates.some(c => c.product.code === wrong.code)).toBe(false);
+    expect(result.trace.memoryState).toContain('失效');
   });
 });

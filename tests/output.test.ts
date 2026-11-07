@@ -28,7 +28,7 @@ describe('output workbooks', () => {
     const wb = createNewProductWorkbook([source[1]], '供应商', '底价');
     const roundtrip = XLSX.read(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }), { type: 'array' });
     const data = XLSX.utils.sheet_to_json<unknown[]>(roundtrip.Sheets[roundtrip.SheetNames[0]], { header: 1 });
-    expect(data[1]).toEqual([32, '供应商', '海大', source[1].model, '条', 4, 281.7441, '底价', '待新建商品',
+    expect(data[1].slice(0, 10)).toEqual([32, '供应商', '海大', source[1].model, '条', 4, 281.7441, '底价', '待新建商品',
       '人工核对后回业务系统新建商品，更新商品目录后重新匹配；本行未写入入库导入模板。']);
     expect(data[0]).not.toContain('商品编号');
   });

@@ -1,3 +1,4 @@
+import { candidateOrigin, confirmationSignature, embeddedBrand } from './review-candidates';
 import type { BrandAdapter } from '../brands/types';
 import type { Candidate, Catalog, MatchResult, MatchTrace, ParsedTire, Product } from './types';
 import { diffTire } from './diff';
@@ -169,9 +170,7 @@ function matchParsedRow(
     && aliasIsCurrent(entry, index.byCode.get(entry.code))
     && (!brand || normalizeBrand(entry.brand) === normalizeBrand(brand))
     && (!parsed || (normalizeBrand(entry.brand) === normalizeBrand(parsed.brand)
-      && (samePatternFamily(parsed.pattern, index.parsedProducts.get(entry.code)?.pattern ?? '')
-        || adapter.confirmedMappings?.some(mapping => normalizeText(mapping.model) === modelKey
-          && mapping.code === entry.code && mapping.spec === index.byCode.get(entry.code)?.spec)))));
+      && samePatternFamily(parsed.pattern, index.parsedProducts.get(entry.code)?.pattern ?? ''))));
   const currentCodes = new Set(current.map(aliasCode));
   if (currentCodes.size === 1 && current.length === entries.length) {
     const product = index.byCode.get([...currentCodes][0]);
@@ -464,7 +463,58 @@ export function matchRow(
   rowNumber: number, rawModel: string, adapter: BrandAdapter,
   index: BrandIndex, aliases: AliasMap, brand?: string,
 ): MatchResult {
-  return explainMatch(matchCheckedRow(rowNumber, rawModel, adapter, index, aliases, brand), index.parsedProducts);
+  if (adapter.id !== 'haida') return explainMatch(matchCheckedRow(rowNumber, rawModel, adapter, index, aliases, brand), index.parsedProducts);
+  let source: ParsedTire | null = null;
+  try { source = adapter.parseInbound(rawModel, brand); } catch { /* Existing parser error remains visible. */ }
+  const entries = findAlias(rawModel, source, aliases);
+  const scoped = entries.filter(entry => typeof entry !== 'string' && entry.confirmation);
+  const validScoped = scoped.filter(entry => {
+    if (typeof entry === 'string' || !entry.confirmation || !source) return false;
+    const target = index.parsedProducts.get(entry.code), saved = entry.confirmation;
+    return target && aliasIsCurrent(entry, index.byCode.get(entry.code))
+      && saved.sourceBrand === normalizeBrand(brand ?? '') && saved.embeddedBrand === embeddedBrand(rawModel)
+      && saved.sourceKey === makeExactKey(source) && saved.rawModel === normalizeText(rawModel)
+      && saved.differences === confirmationSignature(source, target)
+      && !!candidateOrigin(source, target, rawModel, brand ?? '', adapter);
+  });
+  if (entries.length && validScoped.length === entries.length && new Set(validScoped.map(aliasCode)).size === 1) {
+    const product = index.byCode.get(aliasCode(validScoped[0]))!;
+    const reason = '命中逐条确认的型号与 SKU 对应关系，来源、差异和目录快照未变化';
+    return explainMatch({ status: 'matched', method: 'alias', parsed: source, product, candidates: [], reason,
+      trace: { ...makeTrace(rowNumber, rawModel, source, { result: 'matched', method: 'alias', matchedCode: product.code,
+        exactKey: source ? makeExactKey(source) : '', coreKey: '', sizePatternKey: '', exactCount: 0, coreCount: 0, reason }), memoryState: '有效的限定确认' } }, index.parsedProducts);
+  }
+  // Scoped confirmations must never fall through to the legacy, less strict reuse path.
+  let result = matchCheckedRow(rowNumber, rawModel, adapter, index, scoped.length ? {} : aliases, brand);
+  const stale = scoped.length > 0 || result.explanations?.some(item => item.code === 'memory_review');
+  if (stale) {
+    const fresh = matchCheckedRow(rowNumber, rawModel, adapter, index, {}, brand);
+    result = { ...fresh, status: 'review', method: 'candidate', product: undefined,
+      candidates: fresh.product && source ? [candidateScore(source, fresh.product, index), ...fresh.candidates] : fresh.candidates,
+      reason: '旧对应关系已失效或存在冲突，以下为当前目录重新计算的结果，请重新选择并确认。' + (fresh.status === 'unmatched' ? '当前规则下没有找到确定对应商品。' : fresh.reason ?? ''),
+      explanations: [{ code: 'memory_review', message: '来源字段、目录快照或已认可差异发生变化，旧记忆不能直接使用。' }],
+      trace: { ...fresh.trace, result: 'review', method: 'candidate', matchedCode: undefined, memoryState: '失效，已重新检索', originalResult: fresh.status, originalReason: fresh.reason } };
+  }
+  if (source && result.status !== 'matched') {
+    const extra = index.products.flatMap(product => {
+      const target = index.parsedProducts.get(product.code);
+      const origin = target && candidateOrigin(source!, target, rawModel, brand ?? '', adapter);
+      if (!origin) return [];
+      const candidate = candidateScore(source!, product, index);
+      return [{ ...candidate, origin, reason: (origin === 'brand_conflict'
+        ? '品牌列：' + (brand || '未提供') + '；型号品牌：' + embeddedBrand(rawModel) + '；目录品牌：' + product.brand + '；'
+        : '同尺寸、花纹后缀不同，仅为疑似候选；') + candidate.reason }];
+    });
+    if (extra.length) {
+      const candidates = [...new Map([...result.candidates, ...extra].map(c => [c.product.code, c])).values()]
+        .sort((a, b) => b.score - a.score).slice(0, 8);
+      result = { ...result, status: 'review', method: 'candidate', product: undefined, candidates,
+        reason: (result.status === 'review' && result.reason ? result.reason + ' ' : '') + '目录已有疑似商品，请逐项核对差异后确认；尚未认定同款。' };
+    }
+  }
+  result.trace = { ...result.trace, result: result.status, method: result.method, matchedCode: result.status === 'matched' ? result.product?.code : undefined,
+    reason: result.reason, candidates: result.candidates.map(c => ({ code: c.product.code, spec: c.product.spec, score: c.score, reason: c.reason, origin: c.origin })) };
+  return explainMatch(result, index.parsedProducts);
 }
 
 export function unsupportedBrandResult(

@@ -9,9 +9,9 @@ export function resolveResult(result: MatchResult, row: RawInboundRow | undefine
   const update = (status: MatchResult['status'], method: MatchResult['method'], reason: string,
     product = result.product, candidates = result.candidates, explanations: MatchExplanation[] | undefined = result.explanations): MatchResult => ({
     ...result, status, method, reason, warning: undefined, product, candidates, explanations,
-    trace: { ...result.trace, result: status, method, reason, warning: undefined,
+    trace: { ...result.trace, originalResult: result.trace.originalResult ?? result.status, originalReason: result.trace.originalReason ?? result.reason, result: status, method, reason, warning: undefined,
       matchedCode: status === 'matched' ? product?.code : undefined, explanations,
-      candidates: candidates.map(c => ({ code: c.product.code, spec: c.product.spec, score: c.score, reason: c.reason, explanations: c.explanations })) },
+      candidates: candidates.map(c => ({ origin: c.origin, code: c.product.code, spec: c.product.spec, score: c.score, reason: c.reason, explanations: c.explanations })) },
   });
   const errors = row ? validateInboundRow(row) : ['订单行已失效，请重新匹配'];
   if (disposition) return { ...update('unmatched', 'none', (disposition === 'new'

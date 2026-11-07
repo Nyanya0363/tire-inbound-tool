@@ -91,11 +91,12 @@ describe('specification-led matching', () => {
     expect(result.product?.code).toBe('SKU1');
   });
 
-  it.each(['EVT', 'SP'])('does not treat %s as an EV upgrade', suffix => {
+  it.each(['EVT', 'SP'])('offers %s only for explicit review', suffix => {
     const result = matchRow(1, `185R14C 8PR 102/100R HD501${suffix}`, haidaAdapter,
       indexOf([product('SKU1', '185R14C 8PR 102/100R HD501')]), {});
-    expect(result.status).toBe('unmatched');
-    expect(result.candidates).toHaveLength(0);
+    expect(result.status).toBe('review');
+    expect(result.product).toBeUndefined();
+    expect(result.candidates[0].origin).toBe('pattern_suffix');
   });
 
   it('marks other sizes as auxiliary references rather than matching candidates', () => {
