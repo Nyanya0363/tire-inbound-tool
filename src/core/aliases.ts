@@ -8,7 +8,7 @@ export interface ConfirmedAlias {
   brand: string;
   unit: string;
   sourceKey?: string;
-  confirmation?: { sourceBrand: string; embeddedBrand: string; sourceKey: string; differences: string; rawModel: string };
+  confirmation?: { sourceBrand: string; embeddedBrand: string; sourceKey: string; differences: string; rawModel: string; sourceSnapshot?: ParsedTire };
 }
 export type AliasMap = Record<string, string | ConfirmedAlias>;
 
@@ -28,6 +28,16 @@ export function rememberAlias(model: string, product: Product, adapter: BrandAda
   return { code: product.code, spec: product.spec, brand: product.brand, unit: product.unit, sourceKey };
 }
 
+function readSourceSnapshot(value: unknown): ParsedTire | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const data = value as Record<string, unknown>;
+  if (!['brand','pattern','size','raw'].every(key => typeof data[key] === 'string')
+    || !Array.isArray(data.flags) || !data.flags.every(item => typeof item === 'string')
+    || !['ply','loadSpeed','unrecognized'].every(key => data[key] === undefined || typeof data[key] === 'string')
+    || (data.issues !== undefined && (!Array.isArray(data.issues) || !data.issues.every(item => typeof item === 'string')))) return undefined;
+  return data as unknown as ParsedTire;
+}
+
 export function readAliases(source: unknown): AliasMap {
   const result: AliasMap = {};
   if (!source || typeof source !== 'object' || Array.isArray(source)) return result;
@@ -41,7 +51,7 @@ export function readAliases(source: unknown): AliasMap {
       if (entry.code.trim() && entry.spec.trim()) result[normalizeText(key)] = {
         code: entry.code, spec: entry.spec, brand: entry.brand, unit: entry.unit,
         ...(typeof entry.sourceKey === 'string' ? { sourceKey: entry.sourceKey } : {}),
-        ...(entry.confirmation && ['sourceBrand', 'embeddedBrand', 'sourceKey', 'differences', 'rawModel'].every(key => typeof (entry.confirmation as unknown as Record<string, unknown>)[key] === 'string') ? { confirmation: entry.confirmation } : {}),
+        ...(entry.confirmation && ['sourceBrand', 'embeddedBrand', 'sourceKey', 'differences', 'rawModel'].every(key => typeof (entry.confirmation as unknown as Record<string, unknown>)[key] === 'string') ? { confirmation: { ...entry.confirmation, sourceSnapshot: readSourceSnapshot(entry.confirmation.sourceSnapshot) } } : {}),
       };
     }
   }

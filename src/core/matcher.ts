@@ -1,4 +1,4 @@
-import { candidateOrigin, confirmationSignature, embeddedBrand } from './review-candidates';
+import { candidateOrigin, embeddedBrand, validateReviewedMemory } from './review-candidates';
 import type { BrandAdapter } from '../brands/types';
 import type { Candidate, Catalog, MatchResult, MatchTrace, ParsedTire, Product } from './types';
 import { diffTire } from './diff';
@@ -468,15 +468,8 @@ export function matchRow(
   try { source = adapter.parseInbound(rawModel, brand); } catch { /* Existing parser error remains visible. */ }
   const entries = findAlias(rawModel, source, aliases);
   const scoped = entries.filter(entry => typeof entry !== 'string' && entry.confirmation);
-  const validScoped = scoped.filter(entry => {
-    if (typeof entry === 'string' || !entry.confirmation || !source) return false;
-    const target = index.parsedProducts.get(entry.code), saved = entry.confirmation;
-    return target && aliasIsCurrent(entry, index.byCode.get(entry.code))
-      && saved.sourceBrand === normalizeBrand(brand ?? '') && saved.embeddedBrand === embeddedBrand(rawModel)
-      && saved.sourceKey === makeExactKey(source) && saved.rawModel === normalizeText(rawModel)
-      && saved.differences === confirmationSignature(source, target)
-      && !!candidateOrigin(source, target, rawModel, brand ?? '', adapter);
-  });
+  const checked = entries.map(entry => ({ entry, ...validateReviewedMemory(entry, rawModel, brand ?? '', source, index, adapter) }));
+  const validScoped = checked.filter(check => typeof check.entry !== 'string' && check.entry.confirmation && check.valid).map(check => check.entry);
   if (entries.length && validScoped.length === entries.length && new Set(validScoped.map(aliasCode)).size === 1) {
     const product = index.byCode.get(aliasCode(validScoped[0]))!;
     const reason = '命中逐条确认的型号与 SKU 对应关系，来源、差异和目录快照未变化';
@@ -489,11 +482,15 @@ export function matchRow(
   const stale = scoped.length > 0 || result.explanations?.some(item => item.code === 'memory_review');
   if (stale) {
     const fresh = matchCheckedRow(rowNumber, rawModel, adapter, index, {}, brand);
+    const reasons = checked.flatMap(check => check.reasons);
+    if (new Set(entries.map(aliasCode)).size > 1) reasons.push({code:'conflicting_targets',sku:entries.map(aliasCode).join('、'),message:'多条对应记录指向不同SKU，请明确选择'});
+    if (!reasons.length) reasons.push({code:'scope_conflict',sku:entries.map(aliasCode).join('、'),message:'旧对应关系的品牌或基础花纹与当前来源不兼容，请重新核对'});
+    const memoryReason = reasons.map(item => item.message).join('；');
     result = { ...fresh, status: 'review', method: 'candidate', product: undefined,
       candidates: fresh.product && source ? [candidateScore(source, fresh.product, index), ...fresh.candidates] : fresh.candidates,
-      reason: '旧对应关系已失效或存在冲突，以下为当前目录重新计算的结果，请重新选择并确认。' + (fresh.status === 'unmatched' ? '当前规则下没有找到确定对应商品。' : fresh.reason ?? ''),
-      explanations: [{ code: 'memory_review', message: '来源字段、目录快照或已认可差异发生变化，旧记忆不能直接使用。' }],
-      trace: { ...fresh.trace, result: 'review', method: 'candidate', matchedCode: undefined, memoryState: '失效，已重新检索', originalResult: fresh.status, originalReason: fresh.reason } };
+      reason: memoryReason + '。旧对应关系已失效或存在冲突，以下为当前目录重新计算的结果，请重新选择并确认。' + (fresh.status === 'unmatched' ? '当前规则下没有找到确定对应商品。' : fresh.reason ?? ''),
+      explanations: [{ code: 'memory_review', message: memoryReason }],
+      trace: { ...fresh.trace, result: 'review', method: 'candidate', matchedCode: undefined, memoryState: '失效，已重新检索', memoryInvalidations: reasons, originalResult: fresh.status, originalReason: fresh.reason } };
   }
   if (source && result.status !== 'matched') {
     const extra = index.products.flatMap(product => {
@@ -506,8 +503,16 @@ export function matchRow(
         : '同尺寸、花纹后缀不同，仅为疑似候选；') + candidate.reason }];
     });
     if (extra.length) {
-      const candidates = [...new Map([...result.candidates, ...extra].map(c => [c.product.code, c])).values()]
-        .sort((a, b) => b.score - a.score).slice(0, 8);
+      const core = result.product ? candidateScore(source, result.product, index) : undefined;
+      const merged = new Map<string, Candidate>();
+      for (const candidate of [...(core ? [core] : []), ...result.candidates, ...extra]) {
+        const existing = merged.get(candidate.product.code);
+        merged.set(candidate.product.code, existing ? { ...existing, origin: candidate.origin ?? existing.origin,
+          reason: [...new Set([existing.reason, candidate.reason])].join('；') } : candidate);
+      }
+      const candidates = [...merged.values()].sort((a, b) =>
+        Number(b.product.code === core?.product.code) - Number(a.product.code === core?.product.code)
+        || b.score - a.score || a.product.code.localeCompare(b.product.code)).slice(0, 8);
       result = { ...result, status: 'review', method: 'candidate', product: undefined, candidates,
         reason: (result.status === 'review' && result.reason ? result.reason + ' ' : '') + '目录已有疑似商品，请逐项核对差异后确认；尚未认定同款。' };
     }

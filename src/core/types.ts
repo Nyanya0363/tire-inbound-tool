@@ -1,3 +1,4 @@
+export interface MemoryInvalidation { code: string; sku: string; field?: string; before?: string; after?: string; message: string }
 export interface Product {
   code: string;
   name: string;
@@ -72,6 +73,7 @@ export interface MatchTrace {
     explanations?: MatchExplanation[];
   }>;
   memoryState?: string;
+  memoryInvalidations?: MemoryInvalidation[];
   originalResult?: MatchStatus;
   originalReason?: string;
   error?: string;
