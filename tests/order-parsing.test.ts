@@ -42,10 +42,22 @@ describe('October 17 order parsing regressions', () => {
     ['HAIDA 185R14C 8PR 102/100R EV HD501', 'HD501-185R14C'],
     ['HAIDA 255/45ZR20 105W XL HD937', 'HD937-H255/45ZR20XL'],
   ])('reuses the owner-confirmed association for %s', (model, code) => {
-    const result = matchRow(1, model, haidaAdapter, index, {}, '海大');
+    // Reuse requires the owner-confirmed snapshot, not the mutable live catalog.
+    const mapping = haidaAdapter.confirmedMappings!.find(item => item.code === code)!;
+    const snapshotIndex = buildBrandIndex({ ...catalog, products: [{ ...mapping, name: '历史确认商品' }] }, haidaAdapter);
+    const result = matchRow(1, model, haidaAdapter, snapshotIndex, {}, '海大');
     expect(result.status).toBe('matched');
     expect(result.method).toBe('alias');
     expect(result.product?.code).toBe(code);
+  });
+
+  it('keeps HD937 pending when its confirmed snapshot changes', () => {
+    const mapping = haidaAdapter.confirmedMappings!.find(item => item.code === 'HD937-H255/45ZR20XL')!;
+    const changed = buildBrandIndex({ ...catalog, products: [{ ...mapping, name: '商品', unit: '件' }] }, haidaAdapter);
+    const result = matchRow(1, mapping.model, haidaAdapter, changed, {}, '海大');
+    expect(result.status).toBe('review');
+    expect(result.product).toBeUndefined();
+    expect(result.trace.memoryState).toContain('失效');
   });
 
   it('requires confirmation again if the mapped product specification changes', () => {
